@@ -289,6 +289,48 @@ Using Google's standard ADB VID/PID means no custom driver is needed on the host
 
 ---
 
+## Battery Optimizations
+
+### 1. batd Battery Logger Disabled
+**File:** `usr/bin/hiby_player.sh`
+
+`batd` is a debug battery-monitoring daemon. When its binary is present it was launched at every player start with `-t5`, writing a battery log to the SD card every 5 seconds. This causes the SD card to wake on a 5-second cycle even during playback from internal storage.
+
+The launch block has been removed. The `batd` binary itself is untouched — reinstating logging is a one-line change if needed.
+
+| Field | Before | After |
+|-------|--------|-------|
+| SD card wakeup interval | Every 5 s (continuous) | Never |
+
+---
+
+### 2. Red LED Breathing Animation Disabled
+**File:** `module_driver/leds_pwm_add.sh`
+
+The red LED was set to `breathing` trigger — a continuous PWM fade-in/fade-out effect active whenever the device was on. Changed to `none` (LED off).
+
+| Field | Before | After |
+|-------|--------|-------|
+| `led_pwm0_trigger` | `breathing` | `none` |
+
+To restore the breathing effect or use a different trigger (`heartbeat`, `default-on`, etc.) edit this file.
+
+---
+
+### 3. Bluetooth Discoverable / Pairable Timeouts
+**File:** `etc/bluetooth/main.conf`
+
+Both timeouts were `0` — meaning the device stayed permanently discoverable and pairable after BT was enabled, continuously advertising over the air. Set to 180 seconds (BlueZ default).
+
+| Field | Before | After |
+|-------|--------|-------|
+| `DiscoverableTimeout` | `0` (forever) | `180` s |
+| `PairableTimeout` | `0` (forever) | `180` s |
+
+After 3 minutes with no pairing the device stops advertising. Already-paired devices reconnect normally — this only affects new-pairing discovery broadcasts.
+
+---
+
 ## Disclaimer
 
 These are filesystem-level config and layout file edits — no kernel modifications.  

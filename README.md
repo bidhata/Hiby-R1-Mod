@@ -168,7 +168,7 @@ Replaced the stock player binary with the community-patched sorting variant from
 | SNR | 130 dB |
 | THD+N | −107 dB |
 | Output power | ~112 mW @ 16 Ω |
-| Digital filters | 5 built-in (fast/slow rolloff × min-phase/linear + apodizing) |
+| Digital filters | 5 hardware modes (fast/slow rolloff × min-phase/linear-phase + apodizing) |
 
 ---
 
@@ -193,13 +193,27 @@ Tap the settings icon inside MSEB to set the adjustment range: Fine-tuning (±20
 
 ### CS43131 Chip Filters (in-app, Play Settings → Digital Filter)
 
-These are the CS43131's hardware oversampling filter modes. They affect HF rolloff and transient pre/post-ringing — not bass level.
+These are the CS43131's hardware oversampling filter modes, confirmed from the `codec_cs43131.ko` ALSA driver. They are exposed as an ALSA control named `Digital Filter` and accessible in-app via **Play Settings → Digital Filter**. They affect HF rolloff shape and transient pre/post-ringing — not bass level.
 
-| Option | Behaviour |
-|--------|-----------|
-| Sharp / late rolloff | Linear phase, brickwall near Nyquist |
-| Slow / early rolloff | Linear phase, gentle rolloff |
-| Minimum-phase | Minimum-phase sharp rolloff, no pre-ringing |
+| ALSA value | In-app label | Rolloff | Phase | Character |
+|------------|--------------|---------|-------|-----------|
+| `0` (`fast_rolloff_low_latency`) | Minimum-phase | Fast | Minimum phase | No pre-ringing, some post-ringing |
+| `1` (`fast_rolloff_phase_compensated`) | Sharp / late rolloff | Fast | Linear phase | Symmetric pre+post ringing |
+| `2` (`slow_rolloff_low_latency`) | *(not in UI)* | Slow | Minimum phase | Gentle rolloff, no pre-ringing |
+| `3` (`slow_rolloff_phase_compensated`) | Slow / early rolloff | Slow | Linear phase | Gentlest rolloff, symmetric ringing |
+| `4` | *(not in UI)* | Fast | Apodizing | Minimised pre-ringing, near-linear phase |
+
+Values `2` and `4` are not exposed in the in-app Digital Filter dialog and are only accessible via ADB:
+```sh
+# slow rolloff, minimum phase
+adb shell amixer cset name='Digital Filter' 2
+
+# apodizing fast roll-off
+adb shell amixer cset name='Digital Filter' 4
+
+# read current value
+adb shell amixer cget name='Digital Filter'
+```
 
 ### FIR Filters via hm100 DSP (SD card or adb)
 
@@ -240,7 +254,7 @@ Community filter pack (Darwin V2, R2R-targeted but same mechanism):
 | Feature | Location | Notes |
 |---------|----------|-------|
 | Factory test mode | `usr/resource/layout/theme1/test/hiby_test.view` | LCD, touch, key, BT, WiFi, FM hardware tests. Strings only in `simplified_chinese` and `english` locales |
-| NOS mode | `hm100` kernel module | `echo 1 > /sys/devices/platform/hm100/osr_bypass` disables oversampling |
+| NOS mode | `hm100` kernel module | **Not functional on R1** — `hm100` is absent from the R1 kernel. The sysfs path does not exist. |
 
 ---
 

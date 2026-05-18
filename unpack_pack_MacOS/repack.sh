@@ -132,12 +132,12 @@ else
     exit 1
 fi
 
-if ! $ISO_CMD $ISO_FLAGS -o "../../../$OUT_PKG" . ; then
+if ! $ISO_CMD $ISO_FLAGS -o "../../$OUT_PKG" . ; then
     echo "Error: Failed to generate ISO image. See output above for details."
     exit 1
 fi
 
-cd ../../../
+cd ../../
 rm -rf __repack_tmp
 
 echo "======================================"

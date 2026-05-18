@@ -122,15 +122,20 @@ echo "5. Generating ISO image ($OUT_PKG) using genisoimage/mkisofs..."
 # Use genisoimage or mkisofs (macOS commonly uses mkisofs via cdrtools or hdiutil)
 if command -v genisoimage >/dev/null 2>&1; then
     ISO_CMD="genisoimage"
+    ISO_FLAGS="-f -U -J -joliet-long -r -allow-lowercase -allow-multidot"
 elif command -v mkisofs >/dev/null 2>&1; then
     ISO_CMD="mkisofs"
+    ISO_FLAGS="-f -U -J -joliet-long -r"
 else
     echo "Error: Neither genisoimage nor mkisofs found."
     echo "On macOS, install via: brew install cdrtools"
     exit 1
 fi
 
-$ISO_CMD -f -U -J -joliet-long -r -allow-lowercase -allow-multidot -o "../../../$OUT_PKG" . >/dev/null 2>&1
+if ! $ISO_CMD $ISO_FLAGS -o "../../../$OUT_PKG" . ; then
+    echo "Error: Failed to generate ISO image. See output above for details."
+    exit 1
+fi
 
 cd ../../../
 rm -rf __repack_tmp

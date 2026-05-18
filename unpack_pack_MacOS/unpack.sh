@@ -31,7 +31,10 @@ else
     exit 1
 fi
 
-$SEVENZ_CMD x -o"__unpack_tmp" "$UPT_FILE" >/dev/null
+if ! $SEVENZ_CMD x -o"__unpack_tmp" "$UPT_FILE"; then
+    echo "Error: 7-Zip failed to extract $UPT_FILE. Please verify the file is a valid firmware package."
+    exit 1
+fi
 
 echo "Reconstructing xImage..."
 cat __unpack_tmp/ota_v0/xImage.* > xImage

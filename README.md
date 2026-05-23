@@ -7,15 +7,18 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 ## Changes Made
 
-### 1. Volume Cap Increased
+### 1. Volume Cap & Line Out Profile
 **File:** `usr/resource/config.json`
 
-The player originally hard-capped the UI volume slider at 50/100 steps. This has been increased to 60.
+The player originally hard-capped the UI volume slider at 50/100 steps. The `headset` limit has been safely increased to `60`. 
+Additionally, a distinct `lineout` profile was injected into the config to allow full `100` volume when a high-impedance Aux connection is auto-detected.
 
 | Field | Before | After |
 |-------|--------|-------|
 | `lock_vol[headset]` | `50` | `60` |
 | `warn_vol[headset]` | `34` | `42` |
+| `lock_vol[lineout]` | *(None)* | `100` |
+| `warn_vol[lineout]` | *(None)* | `100` |
 
 ---
 
@@ -165,7 +168,7 @@ The USB DAC functionality is fully present in the firmware (kernel driver `uac_s
 
 | # | Change | File |
 |---|--------|------|
-| 1 | Volume cap lifted 50 → 60 | `usr/resource/config.json` |
+| 1 | Volume cap 60 (Headset) & 100 (Line Out) | `usr/resource/config.json` |
 | 2 | MDB/LDB gain table ceiling 12 → 0 (true 0 dB) | `usr/resource/ot_devices.json` |
 | 3 | Native DSD output enabled (`AnalogDsdNative`) | `usr/resource/ot_devices.json` |
 | 4 | ~~Audio engine keys added~~ **REVERTED** — defaults are sufficient | `usr/resource/ot_devices.json` |

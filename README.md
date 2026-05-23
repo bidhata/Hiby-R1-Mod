@@ -117,7 +117,12 @@ Added `--sbc-quality=xq` to the BlueALSA launch. SBC XQ uses bitpool 76 in dual-
 ### 9. Font Replaced — Roboto
 **File:** `usr/resource/fonts/default.otf`
 
-Removed the stock `default.otf` (155 KB, HiBy custom font) and replaced it with the Roboto font family as `default.otf` (~10 MB total). Roboto provides broader Latin/Cyrillic coverage and better legibility at small display sizes.
+Removed the stock `default.otf` (155 KB, HiBy custom font) and replaced it with the Roboto font family. Roboto provides broader Latin/Cyrillic coverage and better legibility at small display sizes.
+
+> [!IMPORTANT]
+> **Apostrophe Spacing Bug Fix ("Don' t"):** 
+> If you experience massive spaces after apostrophes in song titles (e.g., `Don'      t`), this is a known bug caused by the HiBy firmware struggling to read kerning metrics from OpenType (`.otf`) CFF fonts. 
+> **The Fix:** You must use a TrueType (`.ttf`) version of Roboto, but **rename it to `.otf`** (e.g., `default.otf`). The player hardcodes the `.otf` extension but will natively parse the `.ttf` magic bytes perfectly, completely fixing the apostrophe spacing bug!
 
 Also removed Thai and Korean locale string directories — these are no longer needed since Roboto does not carry Thai or Korean glyph ranges:
 
@@ -126,7 +131,7 @@ Also removed Thai and Korean locale string directories — these are no longer n
 | Thai locale strings | `usr/resource/str/thai/` |
 | Korean locale strings | `usr/resource/str/korean/` |
 
-> **Note:** Place your Roboto `.otf` file at `usr/resource/fonts/default.otf` before repacking the firmware image. The `hiby_player` binary loads the font by this exact filename.
+> **Note:** Place your Roboto `.ttf` file renamed to `default.otf` at `usr/resource/fonts/default.otf` before repacking the firmware image.
 
 ---
 
@@ -310,6 +315,17 @@ Using Google's standard ADB VID/PID means no custom driver is needed on the host
 ---
 
 ## Battery Optimizations
+
+### Pro-Tip: The "Pause Before Standby" Bug
+**Type:** User Habit (No file edit required)
+
+There is a known firmware bug in how the ALSA audio pipeline handles sleep states. 
+- **Direct to Standby (Bad):** If the device goes into standby *while a track is actively playing*, the audio pipeline fails to cleanly release the ALSA hardware stream. This holds a kernel wakelock that prevents the Cirrus Logic DAC chip from powering down, leading to massive battery drain during standby.
+- **Pause Before Standby (Good):** Always manually press **Pause** before putting the device to sleep. Pausing cleanly closes the ALSA stream, allowing the DAC chip and I2S clocks to enter a deep hardware sleep state, which dramatically increases your standby battery life!
+
+*(Credit for finding this workaround goes to [u/OOOOOOO0OOOOOOOOO](https://www.reddit.com/user/OOOOOOO0OOOOOOOOO/))*
+
+---
 
 ### 1. batd Battery Logger Disabled
 **File:** `usr/bin/hiby_player.sh`

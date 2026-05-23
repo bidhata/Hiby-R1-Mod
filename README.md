@@ -7,15 +7,15 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 ## Changes Made
 
-### 1. Volume Cap Removed
+### 1. Volume Cap Increased
 **File:** `usr/resource/config.json`
 
-The player hard-capped the UI volume slider at 50/100 steps regardless of the CS43131's actual output range.
+The player originally hard-capped the UI volume slider at 50/100 steps. This has been increased to 60.
 
 | Field | Before | After |
 |-------|--------|-------|
-| `lock_vol[headset]` | `50` | `100` |
-| `warn_vol[headset]` | `34` | `100` |
+| `lock_vol[headset]` | `50` | `60` |
+| `warn_vol[headset]` | `34` | `42` |
 
 ---
 
@@ -165,7 +165,7 @@ The USB DAC functionality is fully present in the firmware (kernel driver `uac_s
 
 | # | Change | File |
 |---|--------|------|
-| 1 | Volume cap lifted 50 → 100 | `usr/resource/config.json` |
+| 1 | Volume cap lifted 50 → 60 | `usr/resource/config.json` |
 | 2 | MDB/LDB gain table ceiling 12 → 0 (true 0 dB) | `usr/resource/ot_devices.json` |
 | 3 | Native DSD output enabled (`AnalogDsdNative`) | `usr/resource/ot_devices.json` |
 | 4 | ~~Audio engine keys added~~ **REVERTED** — defaults are sufficient | `usr/resource/ot_devices.json` |

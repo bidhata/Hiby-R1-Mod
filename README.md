@@ -143,6 +143,22 @@ Replaced the stock player binary with the community-patched sorting variant from
 **Source:** https://github.com/hiby-modding/hiby-mods/tree/main/binaries  
 **Compatibility note:** The upstream repo primarily targets the HiBy R3 Pro II. Tested to boot and function on the R1 — verify your own build before flashing.
 
+### 11. USB DAC Mode Unlocked
+**Files:**
+- `usr/resource/set_functions.json`
+- `usr/resource/midi_set_functions.json`
+- `usr/resource/config.json`
+
+The USB DAC functionality is fully present in the firmware (kernel driver `uac_sa`, config scripts, UI layout), but was hidden from the menu.  
+*(Inspired by the community discussion in [r/Hiby](https://www.reddit.com/r/Hiby/comments/1tji2bz/hiby_r1_as_a_dac/))*
+
+| Flag | File | Before | After | Effect |
+|------|------|--------|-------|--------|
+| `usb_mode` | `set_functions.json` | `0` | `1` | Shows the "USB device mode" dropdown (Storage / Audio) |
+| `dac_to_store` | `config.json` | `0` | `1` | Gracefully handles DAC mode exit / cable disconnect |
+| `dac_feedback` | `set_functions.json` | `0` | `1` | Unlocks USB DAC feedback UI toggle |
+| `standby` / `about` / `car_mode` | `set_functions.json` | `0` | `1` | Unlocks additional missing features |
+
 ---
 
 ## Summary Table
@@ -159,6 +175,7 @@ Replaced the stock player binary with the community-patched sorting variant from
 | 8 | SBC XQ enabled (~500 kbps, bitpool 76) | `usr/bin/bt_init` |
 | 9 | Font replaced: stock `default.otf` → Roboto (~10 MB); Thai & Korean locale strings removed | `usr/resource/fonts/default.otf` |
 | 10 | Patched player binary — article/symbol sort fix | `usr/bin/hiby_player` |
+| 11 | USB DAC Mode, Standby, Car Mode & About UI Unlocked | `usr/resource/set_functions.json`, `config.json` |
 
 ---
 

@@ -477,6 +477,53 @@ mksquashfs squashfs-root hiby_r1_enhanced.sqsh -comp xz -b 131072 -no-xattrs
 Flash via OTA or recovery mode.
 
 ---
+## HiBy R1 — Brightness Floor Patch (minimum 5 → 1)
+**Target binary:** `/usr/bin/hiby_player` (MIPS32 LE ELF)
+**Change:** Removes the backlight minimum clamp so the lowest slider position reaches sysfs value `1` instead of `5`. Measured ~25–30 lux → ~7–8 lux on this panel. Much darker for night use.
+---
+### Background
+The player floors the backlight: slider values map 1:1 to the sysfs node (`6→6 … 100→100`), but anything resolving to **1–4 is forced up to 5**. The panel dims well below that — writing `1` directly is clearly darker and still on. The floor is a single clamp in the backlight-set routine:
+
+```asm
+li    a1, 5            ; floor value
+addiu v1, v0, -1
+sltiu v1, v1, 4        ; v1 = (1 <= value <= 4) ? 1 : 0
+movz  a1, v0, v1       ; value NOT in 1..4 -> a1 = value; else a1 stays 5
+jal   <write_to_sysfs>
+```
+
+**Change:** `sltiu $v1, $v1, 4` → `sltiu $v1, $v1, 0` (`0x04` → `0x00`). The test is then always false, `movz` always passes the real value, the floor never fires. `0` (backlight off) is unaffected.
+---
+### Patch Locations
+Offset is build-dependent. bidhata's firmware ships the Sorting-patch player, so that is the primary target; stock listed for reference.
+
+| Binary | Offset (hex) | Offset (dec) | Before | After | Instruction |
+|---|---|---|---|---|---|
+| Sorting variant | `0x0007C900` | 510,208 | `04 00 63 2C` | `00 00 63 2C` | `SLTIU $v1, $v1, 4` → `0` |
+| Stock | `0x00067440` | 422,976 | `04 00 63 2C` | `00 00 63 2C` | `SLTIU $v1, $v1, 4` → `0` |
+---
+### How to Apply
+> **Back up your original binary before patching.**
+
+**Option A — `dd` (fixed offset).** Sorting variant:
+```bash
+FILE="hiby_player"
+cp "$FILE" "${FILE}.orig"
+printf '\x00' | dd of="$FILE" bs=1 seek=510208 conv=notrunc
+```
+For the stock binary, use `seek=422976`.
+
+**Option B — `patch_brightness.py` (any build).** Locates the clamp by instruction signature, so it works regardless of binary layout (handy for other community variants where the offset differs):
+```bash
+python3 patch_brightness.py hiby_player   # writes hiby_player_patched
+```
+---
+### Verification
+On device, set the slider to minimum:
+```bash
+cat /sys/class/backlight/backlight_pwm0/brightness   # should read 1, not 5
+```
+---
 
 ## After Flashing — Manual Setup
 

@@ -396,6 +396,8 @@ cp "$FILE" "${FILE}.orig"
 for offset in 974708 3007408 3014304 3052412; do
     printf '\xe8\xfd' | dd of="$FILE" bs=1 seek=$offset conv=notrunc
 done
+```
+
 ----
 
 # HiBy R1 Sound Enhancement

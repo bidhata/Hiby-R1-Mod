@@ -543,9 +543,131 @@ PEQ settings (Headphones preset):
 | 3 | High Shelf | 10000 Hz | −2.0 dB | — |
 
 ---
+# Additional Community Modifications
 
-## Disclaimer
+## 12. Parametric Equalizer (PEQ) Fully Enabled
 
-These are filesystem-level config and layout file edits — no kernel modifications.  
-Changes affect audio output levels. Use appropriate volume and hearing protection.  
-Flash and use at your own risk.
+**Files:**
+
+* `usr/bin/hiby_player`
+* `usr/resource/eq.ini`
+* `usr/resource/str/*/eq.ini`
+
+The complete Parametric Equalizer implementation already exists inside the HiBy R1 firmware resources and UI layouts. However, the stock 1.6 firmware does not fully expose the functionality through the bundled audio engine.
+
+Testing revealed that replacing the stock 1.6 `hiby_player` binary with the newer 1.7 Beta player binary enables the complete PEQ feature set while remaining compatible with the existing 1.6 Mod firmware modifications.
+
+### Enabled Features
+
+* PEQ Combined mode
+* Multi-band Parametric Equalizer
+* Frequency control
+* Gain control
+* Q-factor control
+* Filter type selection
+* Preset save and recall
+* Full integration with the existing EQ menu
+
+### Required Supporting Files
+
+The following files from firmware 1.7 Beta should also be migrated:
+
+```text
+/usr/resource/eq.ini
+/usr/resource/str/*/eq.ini
+```
+
+These files contain updated PEQ definitions and language resources used by the newer player binary.
+
+### Result
+
+The resulting firmware successfully combines:
+
+* All 1.6 Mod enhancements
+* USB DAC Mode
+* Standby Menu
+* Car Mode
+* About Menu
+* Full Parametric EQ (PEQ)
+* Existing battery optimizations
+* Bluetooth SBC XQ support
+* Native DSD support
+* Internet Radio support
+
+### Stability
+
+This configuration has been tested on real HiBy R1 hardware and is confirmed operational.
+
+No regressions were observed in:
+
+* Local playback
+* Bluetooth audio
+* USB DAC mode
+* Library scanning
+* Internet Radio
+* MSEB
+* Standard EQ functionality
+
+---
+
+# Current Recommended Firmware Configuration
+
+The most feature-complete community firmware currently known is:
+
+**HiBy R1 1.6 Mod + HiBy R1 1.7 Beta Audio Engine**
+
+This combination provides:
+
+| Feature               | Status |
+| --------------------- | ------ |
+| Volume Unlock         | ✅      |
+| Native DSD            | ✅      |
+| USB DAC Mode          | ✅      |
+| Standby Menu          | ✅      |
+| Car Mode              | ✅      |
+| About Menu            | ✅      |
+| Internet Radio        | ✅      |
+| SBC XQ Bluetooth      | ✅      |
+| PEQ Combined          | ✅      |
+| Parametric EQ Editor  | ✅      |
+| Sorting Patch         | ✅      |
+| Battery Optimizations | ✅      |
+
+---
+
+# Credits
+
+## Original Research
+
+Many of the firmware discoveries documented here were made through community reverse engineering efforts and testing by members of the HiBy community.
+
+Special thanks to:
+
+* HiBy Modding Community
+* HiBy Linux reverse-engineering contributors
+* Rockbox R1 development contributors
+
+## PEQ and USB DAC Enablement Research
+
+PEQ enablement, USB DAC unlocking, firmware repacking validation, OTA package reconstruction research, and compatibility testing between the 1.6 Mod firmware and the 1.7 Beta audio engine were performed and documented by:
+
+**u/hrwoyem**
+
+Reddit:
+https://www.reddit.com/user/hrwoyem/
+
+These findings demonstrated that the HiBy R1 firmware already contained dormant functionality that could be unlocked through configuration changes and selective component migration rather than requiring binary patch development.
+
+---
+
+# Disclaimer
+
+These modifications are unofficial community firmware modifications.
+
+Flashing modified firmware always carries risk, including device malfunction or data loss.
+
+Neither HiBy nor the contributors listed above are responsible for any damage resulting from use of modified firmware.
+
+Proceed at your own risk and always keep a copy of the original firmware before flashing.
+
+

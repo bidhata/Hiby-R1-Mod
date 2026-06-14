@@ -5,6 +5,28 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 ---
 
+## 🆕 New Features in this Build
+
+### 1. Mono / Stereo Toggle (Trigger File Method)
+**Requested by:** ApolloMoonLandings (Reddit)  
+Adds support for stereo-to-mono downmixing for users with single-sided hearing or specific monitoring needs.
+
+**How to use:**
+- **To enable Mono:** Create an empty file or folder named `MONO` in the root of your SD card. The device will detect it, swap the ALSA configuration, and reboot automatically into Mono mode.
+- **To return to Stereo:** Delete or rename the `MONO` file/folder. The device will reboot back into Stereo mode.
+
+**Technical Implementation:**
+- Custom ALSA configuration at `/usr/data/asound.conf.mono` using a `route` plugin with a `ttable` to mix L+R channels.
+- Background monitor script `/usr/data/mono_monitor.sh` auto-started via `/etc/init.d/S92_03_start_music_player`.
+
+### 2. Russian Language Fixes
+**Contributor:** Much_West_2785 (Reddit)  
+Extensive fixes for the Russian localization strings (`usr/resource/str/russian/`), correcting grammatical errors, truncated text, and inconsistent terminology found in the stock firmware.
+
+### 3. Font Replacement — MiSans
+**File:** `usr/resource/fonts/default.otf`  
+The stock font has been replaced with **MiSans**. This provides a cleaner, more modern aesthetic and excellent legibility for both Latin and Cyrillic scripts.
+
 ## Changes Made
 
 ### 1. Volume Cap & Line Out Profile

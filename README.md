@@ -3,6 +3,12 @@
 Firmware patches for the **HiBy R1** and **MiDi R1** portable music players.  
 Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS43131** DAC/amp chip.
 
+## Quick Install
+
+* Download the ```r1.upt``` file in the [releases](https://github.com/bidhata/Hiby-R1-Mod/releases) page and place it in the root of your SD card.
+* On your Hiby R1, go to ```Settings → Firmware Update → Via SD-card```. Select "OK" when prompted to "Update system firmware?".
+* The player will reboot and then update with the found custom firmware. The device will reboot again, and you'll see a custom splash screen before the Hiby logo, which confirms the custom firmware was successfully installed. 
+
 ---
 
 ## 🆕 New Features in this Build

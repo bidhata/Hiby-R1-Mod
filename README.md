@@ -5,6 +5,19 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 ---
 
+## 🚀 The Mission: Support the Development
+
+To start the development and testing of these mods, I need the actual hardware. I am currently raising funds to purchase other **HiBy** devices. 
+
+### **Target: $200 USD** 🎯
+Your support will directly fund the purchase of the device for reverse engineering and firmware testing.
+
+💖 **[Sponsor me on GitHub](https://github.com/sponsors/bidhata)**
+
+---
+
+---
+
 ## 🆕 New Features in this Build
 
 ### 1. Mono / Stereo Toggle (Trigger File Method)

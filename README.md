@@ -561,6 +561,46 @@ On device, set the slider to minimum:
 cat /sys/class/backlight/backlight_pwm0/brightness   # should read 1, not 5
 ```
 ---
+## HiBy R1 — Bluetooth Audio Input Unlock
+**Target binary:** `/usr/bin/hiby_player` (MIPS32 LE ELF)
+**Change:** Unlocks the natively supported but hidden "Bluetooth audio input" (DAC/Sink mode) in the Bluetooth settings list. Works flawlessly with UI navigation.
+---
+### Background
+The firmware fully supports Bluetooth Sink mode (used in R3 Pro II), but in R1 the option is removed from the settings list, and a blocklist routine prevents its view (`vg_bt_input_hiby`) from opening. 
+
+**Change 1 (Bypass Blocklist):** The blocklist routine (`FUN_004f7220`) explicitly checks against `vg_bt_input_hiby`. We shift the string pointer by 1 byte, making it check for `g_bt_input_hiby` instead, effectively unblocking the view.
+```asm
+addiu s1, s1, LOW(vg_addr)   ->   addiu s1, s1, LOW(vg_addr) + 1
+```
+
+**Change 2 (Inject Menu Item):** The UI builds the Bluetooth menu item by item. We overwrite one item addition (`volume_sync`) with a jump to a code cave (40 bytes of `0x00` in `.rodata`). In the cave, we execute the original `volume_sync` addition, followed by our new `bt_input` addition, and jump back seamlessly.
+```asm
+lui a1, HIGH(bt_in_addr)
+move a0, s2
+jal add_item_func
+addiu a1, a1, LOW(bt_in_addr)
+```
+---
+### Patch Locations
+Offset is build-dependent. Values for the Sorting-patch player (fw 1.6):
+
+| Description | Offset (hex) | Offset (dec) | Before | After | Change |
+|---|---|---|---|---|---|
+| Blocklist bypass | `0x000F723C` | 1,012,284 | `58 3C 31 26` | `59 3C 31 26` | `addiu s1,s1,15448` → `15449` |
+| Cave Jump | `0x000AD034` | 708,660 | `79 00 05 3C` | `FE BD 1D 08` | `lui a1,0x79` → `j 0x76f7f8` |
+| Code Cave | `0x0036F7F8` | 3,602,424 | `00 00 00 ...` | *(Cave payload)* | 40 bytes of payload |
+---
+### How to Apply
+> **Back up your original binary before patching.**
+
+**Using `patch_bt_input.py` (any build).** Locates the UI menu builder, blocklist offsets, and an empty code cave automatically by instruction signature. It works regardless of binary layout (handy for other community variants where the offset differs):
+```bash
+python3 patch_bt_input.py hiby_player   # patches hiby_player in place
+```
+---
+### Verification
+On device, open Bluetooth settings. "Bluetooth audio input" should appear in the list. Tapping it opens the DAC/Sink mode. Tapping the back arrow returns to the menu seamlessly.
+---
 
 ## After Flashing — Manual Setup
 

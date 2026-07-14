@@ -9,11 +9,12 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 To start the development and testing of these mods, I need the actual hardware. I am currently raising funds to purchase other **HiBy** devices. 
 
-### **Target: $200 USD** 🎯
-Your support will directly fund the purchase of the device for reverse engineering and firmware testing.
-
-💖 **[Sponsor me on GitHub](https://github.com/sponsors/bidhata)**
-
+>### **Target: $200 USD** 🎯
+>Your support will directly fund the purchase of the device for reverse engineering and firmware testing.
+>If this custom firmware breathed new life into your HiBy R1, please consider leaving a tip! Endless hours of reverse engineering, Ghidra decompiling, and kernel testing went into unlocking this device for the community.
+>
+>💖 **[Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**
+>
 ---
 
 ---

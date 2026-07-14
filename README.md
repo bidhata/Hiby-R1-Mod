@@ -78,16 +78,11 @@ Replaced the stock HiBy font with the highly legible **Roboto** font (renamed to
 
 ## 🛠️ Installation Instructions
 
-*(Assuming you know how to unpack/repack the squashfs filesystem)*
 
-1. Download the modded `squashfs-root` contents.
-2. Ensure your font (`default.otf`) and custom assets are placed correctly.
-3. Repack the firmware image using `mksquashfs`:
-   ```bash
-   mksquashfs squashfs-root hiby_r1_enhanced.sqsh -comp xz -b 131072 -no-xattrs
-   ```
-4. Flash to your HiBy R1 via OTA or recovery mode.
-5. Enjoy!
+1. Download the modded r1.upt .
+2. Copy it to sdcard.
+3. Flash to your HiBy R1 via Flash Recovery from SDCARD under System Setting.
+4. Enjoy!
 
 ---
 

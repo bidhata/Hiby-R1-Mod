@@ -47,6 +47,7 @@ Injected custom kernel parameters into the startup script (`hiby_player.sh`):
 - **SD Card Read-Ahead:** Expanded the read-ahead buffer to 2MB (from 128KB) — eliminates UI stuttering when scanning libraries or loading large FLAC files.
 - **Sysctl Cache Tuning:** Tuned `vm.vfs_cache_pressure` to keep UI assets and album art cached in RAM longer.
 - **SD Card Caching:** Album art and the music database are now cached to the MicroSD card, taking the load off the slower internal flash.
+- **Optimized Flash Mount Options (/usr/bin/mount_ubifs.sh):** Dramatically lowering NAND flash wear and speeding up settings/saving operations by changing mount option from *sync* to *noatime*. ( TESTING )
 
 ### 4. Fully Unlocked Hidden Features
 Patched the UI and configuration JSONs (`set_functions.json` & `config.json`) to expose features HiBy hid from the stock firmware:

@@ -1,6 +1,5 @@
 # HiBy R1 Granular Tweaks Walkthrough
 
-I have successfully applied all the requested granular system tweaks, diving deep into both the PMIC configuration and the filesystem initialization scripts!
 
 ## Changes Made
 
@@ -29,6 +28,3 @@ I modified the driver initialization parameters for the `axp2101.ko` kernel modu
 +insmod axp2101.ko i2c_bus_num=0 charge_voltage_limit=4350 charge_term_current=50 dcdc3_always_pwmmode=0 ...
 ```
 
-## Validation
-
-These changes have been written to the extracted firmware filesystem. You can proceed to repack the squashfs root filesystem, build the firmware image, and flash it to the device!

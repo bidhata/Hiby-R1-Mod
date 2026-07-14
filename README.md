@@ -72,7 +72,7 @@ Adds support for stereo-to-mono downmixing for users with single-sided hearing o
 - **To enable Mono:** Create an empty file named `MONO` in the root of your SD card. The device will reboot into Mono mode.
 
 ### 5. Global Font Replacement
-Replaced the stock HiBy font with the highly legible **Roboto** font (renamed to `default.otf` to fix the HiBy apostrophe spacing bug).
+Replaced the stock HiBy font with the highly legible **MiSans** font (renamed to `default.otf` to fix the HiBy apostrophe spacing bug).
 
 ---
 

@@ -134,9 +134,6 @@ Corrected grammatical errors, truncated text, and inconsistent terminology acros
 ### Pro-Tip: The "Pause Before Standby" Bug
 > **Always press Pause before putting the device to sleep.** If the device goes into standby while a track is playing, the ALSA audio pipeline fails to release the hardware stream, holding a kernel wakelock that prevents the DAC chip from powering down → massive battery drain during standby.  
 
-### batd Battery Logger Disabled
-**File:** `usr/bin/hiby_player.sh`  
-`batd` wrote a battery log to the SD card every 5 seconds, causing continuous SD card wakeups. Launch block removed. Binary untouched.
 
 ---
 

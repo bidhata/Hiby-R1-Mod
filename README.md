@@ -30,7 +30,7 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 ## 🚀 NEW: Exclusively in this v1.8.b1 Build
 
-### 1. Unified Theme Port (by @Jepl4r)
+### 1. Unified Theme (by @Jepl4r) Ported partially.
 Ported the gorgeous **Unified Theme** originally designed for the R3 Pro II:
 - Modernized icons across the entire UI.
 - Rounded launcher design and sleek custom boot logo.

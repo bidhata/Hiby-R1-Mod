@@ -112,6 +112,9 @@ The USB DAC functionality is fully present in the firmware (kernel driver `uac_s
 - **To return to Stereo:** Delete the `_MONO_` file → device reboots back to Stereo.
 - Uses a custom ALSA `route` plugin with `ttable` to mix L+R channels.
 
+### Serial Console Shell Disabled 
+- Spawns a root shell on the hardware serial pins (TX/RX) on the motherboard. Unless you plan on taking the device apart and soldering a UART cable to the motherboard for low-level debugging, this doesn't do anything for you. May save some extra memory even if very tiny.
+- /etc/inittab --> #console::respawn:-/bin/sh # GENERIC_SERIAL 
 ---
 
 ### Font Replacement

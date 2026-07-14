@@ -1,0 +1,101 @@
+To implement the Trigger File Method, we will create a background script that monitors your SD card for a file or
+  folder named MONO. When it sees this "trigger," it will swap the audio configuration and restart the player.
+
+  Step 1: Create the Mono Configuration
+  Create a new file at usr/data/asound.conf.mono with the following content. This configuration mixes the Left and
+  Right channels together (50% each) and sends the result to both ears.
+
+# Mono downmix configuration
+pcm.hq_out {
+     type plug
+     slave {
+         pcm "hw:0,0"
+     }
+     route_policy copy
+	 }
+
+ pcm.mono_downmix {
+     type route
+     slave.pcm "hq_out"
+     # Mix L+R into both output channels
+     ttable.0.0 0.5
+     ttable.1.0 0.5
+     ttable.0.1 0.5
+     ttable.1.1 0.5
+	 }
+
+ pcm.sv_out {
+     type softvol
+     slave {
+         pcm "mono_downmix"
+     }
+     control {
+         name "SW Volume"
+         card 0
+     }
+     min_dB -51.0
+     max_dB 0.0
+     resolution 256
+    }
+ 
+ pcm.!default {
+     type asym
+     playback.pcm "sv_out"
+     capture.pcm "hw:0,0"
+}
+
+  Step 2: Backup your Stereo Configuration
+  Save your current configuration as a backup so the script can switch back to it.
+  Copy /usr/data/asound.conf to /usr/data/asound.conf.stereo.
+cp usr/data/asound.conf usr/data/asound.conf.stereo
+
+  Step 3: Create the Monitor Script
+  Create a script at /usr/data/mono_monitor.sh to handle the detection and switching logic:
+
+#!/bin/sh
+ TRIGGER="/mnt/sd_0/_MONO_"
+ ACTIVE_CONF="/usr/data/asound.conf"
+ MONO_CONF="/usr/data/asound.conf.mono"
+ STEREO_CONF="/usr/data/asound.conf.stereo"
+
+ while true; do
+     # Determine current mode by checking the file content
+     if grep -q "mono_downmix" "$ACTIVE_CONF"; then
+         CURRENT="mono"
+     else
+         CURRENT="stereo"
+     fi
+
+     # Determine desired mode based on SD card trigger
+     if [ -e "$TRIGGER" ]; then
+         WANT="mono"
+     else
+         WANT="stereo"
+     fi
+
+# Apply change if there is a mismatch
+     if [ "$WANT" != "$CURRENT" ]; then
+         if [ "$WANT" = "mono" ]; then
+             cp "$MONO_CONF" "$ACTIVE_CONF"
+        else
+            cp "$STEREO_CONF" "$ACTIVE_CONF"
+         fi
+         # Restart player (this triggers a reboot on the R1 for safety)
+         killall hiby_player
+     fi
+
+     sleep 10
+ done
+
+  Step 4: Auto-start on Boot
+  To make this work every time you turn on the device, edit the file /etc/init.d/S92_03_start_music_player and add this
+  line near the top of the start) section:
+
+  sh usr/data/mono_monitor.sh &
+
+  How to use it:
+   1. For Mono: Create a folder or empty file named MONO on the root of your SD card. The device will detect it within
+      10 seconds, reboot, and start in Mono mode.
+   2. For Stereo: Delete or rename the MONO folder on your SD card. The device will detect the change, reboot, and
+      return to Stereo mode.
+    done

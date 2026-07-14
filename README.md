@@ -1,6 +1,6 @@
-# 🎶 HiBy R1 / MiDi R1 — Ultimate Custom Firmware Mod
+# 🎶 HiBy R1 — Ultimate Custom Firmware Mod
 
-The most feature-complete custom firmware for the **HiBy R1** & **MiDi R1** portable music players.  
+The most feature-complete custom firmware for the **HiBy R1** portable music players.  
 Based on **v1.8.b1** — unlocks hidden features, maximizes performance, protects battery health, and overhauls the UI.
 
 Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS43131** DAC/amp chip.

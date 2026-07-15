@@ -1,3 +1,9 @@
+# BUGS Alert - What to Expect
+- "Developer Options" removed by Hiby in this new build.
+- Volume getting locked multiple times
+- USB DAC and Car modes are not stable like before.
+- Partial ported theme looks broken on 1st boot. So, after flashing the firmware, restore factory settings, and then choose theme 2 from system settings.
+  
 # 🎶 HiBy R1 — Ultimate Custom Firmware Mod
 
 The most feature-complete custom firmware for the **HiBy R1** portable music players.  
@@ -57,12 +63,12 @@ Patched the UI and configuration JSONs (`set_functions.json` & `config.json`) to
 | USB Device Mode | `usb_mode` | Switch between Storage / USB DAC / Dock (ADB) |
 | DAC Charge Disable | `dac_charge_disable` | Toggle USB charging noise reduction |
 | DAC Feedback | `dac_feedback` | USB DAC feedback UI toggle |
-| Car Mode | `car_mode` | Auto-play music when power is connected |
-| Double Tap to Wake | `double_touch_wakeup` | Wake screen without power button |
+| Car Mode **( Disabled Due to Issues )**| `car_mode` | Auto-play music when power is connected |
+| Double Tap to Wake **( Not Working )**| `double_touch_wakeup` | Wake screen without power button |
 | Standby | `standby` | Standby/sleep settings |
 | CUE Sheet Explorer | `explorer_in_cue_enable` | Browse CUE sheets from file explorer |
 | OTG Scanning | `otg_scan_enable` | Build library from OTG USB drives |
-| Volume Meter | `volume_meter_enable` | On-screen volume meter |
+| Volume Meter **( Disabled Due to Issues )** | `volume_meter_enable` | On-screen volume meter |
 | Auto-Scroll Playplane | `auto_scroll_playplane` | Scrolling now-playing text |
 | Speed Play | `speed_play_enable` | Playback speed control |
 | SD Image Cache | `tf_image_cache_enable` | Cache album art to SD card |

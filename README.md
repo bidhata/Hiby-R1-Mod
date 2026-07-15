@@ -3,19 +3,10 @@
 - Volume getting locked multiple times
 - USB DAC and Car modes are not stable like before.
 - Partial ported theme looks broken on 1st boot. So, after flashing the firmware, restore factory settings, and then choose theme 2 from system settings.
-  
-# 🎶 HiBy R1 — Ultimate Custom Firmware Mod
 
-The most feature-complete custom firmware for the **HiBy R1** portable music players.  
-Based on **v1.8.b1** — unlocks hidden features, maximizes performance, protects battery health, and overhauls the UI.
+**Please Remember:** I'm not a developer — I'm just a **curious reverse-engineering addict** who can't resist poking at firmware to see what happens. 😄
 
-Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS43131** DAC/amp chip.
-
-## Quick Install
-
-* Download the ```r1.upt``` file in the [releases](https://github.com/bidhata/Hiby-R1-Mod/releases) page and place it in the root of your SD card.
-* On your Hiby R1, go to ```Settings → Firmware Update → Via SD-card```. Select "OK" when prompted to "Update system firmware?".
-* The player will reboot and then update with the found custom firmware. The device will reboot again, and you'll see a custom splash screen before the Hiby logo, which confirms the custom firmware was successfully installed. 
+I basically flip every switch I can find, cross my fingers, and release the modded firmware into the wild. There's no way I can test every single feature or setting on my own. So think of this as a community experiment: you break it, test it, report it, and together we'll figure out what actually works and what still needs tweaking. Every bug report, success story, and weird discovery helps make the next release better. Without your feedback, I'm just a guy enthusiastically pressing random buttons in an editor.
 
 ---
 
@@ -31,6 +22,23 @@ Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS
 
 > 
 > *Every dollar keeps this project alive and motivates future updates!*
+
+---
+  
+# 🎶 HiBy R1 — Ultimate Custom Firmware Mod
+
+The most feature-complete custom firmware for the **HiBy R1** portable music players.  
+Based on **v1.8.b1** — unlocks hidden features, maximizes performance, protects battery health, and overhauls the UI.
+
+Device runs HiBy Linux on an **Ingenic X1600** MIPS SoC with a **Cirrus Logic CS43131** DAC/amp chip.
+
+## Quick Install
+
+* Download the ```r1.upt``` file in the [releases](https://github.com/bidhata/Hiby-R1-Mod/releases) page and place it in the root of your SD card.
+* On your Hiby R1, go to ```Settings → Firmware Update → Via SD-card```. Select "OK" when prompted to "Update system firmware?".
+* The player will reboot and then update with the found custom firmware. The device will reboot again, and you'll see a custom splash screen before the Hiby logo, which confirms the custom firmware was successfully installed. 
+
+
 
 ---
 

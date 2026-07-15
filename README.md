@@ -1,22 +1,10 @@
-# BUGS Alert - What to Expect
-- "Developer Options" removed by Hiby in this new build.
-- Volume getting locked multiple times
-- USB DAC and Car modes are not stable like before.
-- Partial ported theme looks broken on 1st boot. So, after flashing the firmware, restore factory settings, and then choose theme 2 from system settings.
-
 **Please Remember:** I'm not a developer — I'm just a **curious reverse-engineering addict** who can't resist poking at firmware to see what happens. 😄
 
 I basically flip every switch I can find, cross my fingers, and release the modded firmware into the wild. There's no way I can test every single feature or setting on my own. So think of this as a community experiment: you break it, test it, report it, and together we'll figure out what actually works and what still needs tweaking. Every bug report, success story, and weird discovery helps make the next release better. Without your feedback, I'm just a guy enthusiastically pressing random buttons in an editor.
-
----
-
-> [!IMPORTANT]  
-> ## 💖 Support the Development!
-> 
-> Endless hours of reverse engineering, Ghidra decompiling, kernel testing, and UI patching went into unlocking this device for the community. I am currently raising funds to purchase other HiBy devices to expand this modding ecosystem.
+>I am currently raising funds to purchase other HiBy devices to expand this modding ecosystem.
 > 
 > ### 🎯 Target: $200 USD
-> Your support directly funds the purchase of hardware for reverse engineering and firmware testing.
+> Your support directly funds the purchase of hardware for reverse engineering and firmware testing. Next Targetted device Hiby R3 Pro II.
 > 
 > **💖 [Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**  
 
@@ -24,7 +12,12 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 > *Every dollar keeps this project alive and motivates future updates!*
 
 ---
-  
+# BUGS Alert - What to Expect
+- "Developer Options" removed by Hiby in this new build.
+- Volume getting locked multiple times
+- USB DAC and Car modes are not stable like before.
+- Partial ported theme looks broken on 1st boot. So, after flashing the firmware, restore factory settings, and then choose theme 2 from system settings.
+    
 # 🎶 HiBy R1 — Ultimate Custom Firmware Mod
 
 The most feature-complete custom firmware for the **HiBy R1** portable music players.  

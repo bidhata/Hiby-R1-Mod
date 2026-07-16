@@ -89,6 +89,17 @@ Your R1 can now act as a **Bluetooth DAC receiver**! Stream audio from your phon
 - Back button and disconnect dialog work flawlessly.
 - *Credit: [@japq7s](https://github.com/japq7s) for the original patch and `patch_bt_input.py` script.*
 
+### 7. Battery Charging Optimizations (AXP2101 PMIC)
+
+To improve long-term battery health and charging accuracy, the following parameters were modified in the AXP2101 PMIC driver initialization (`axp2101.sh`):
+
+*   **Optimized Charge Voltage Limit (`charge_voltage_limit=4350`)**
+    The maximum charging voltage was reduced from 4.4V (4400) to 4.35V (4350). While this sacrifices a tiny fraction of maximum playtime per charge, it significantly reduces the chemical stress placed on the battery cells. This mitigates long-term degradation and extends the overall lifespan of the battery hardware.
+
+*   **Improved Charge Termination Current (`charge_term_current=70`)**
+    The current at which the charger cuts off was reduced from 100mA to 50mA. This allows the battery to absorb a slower, final "trickle" charge at the very end of its cycle, ensuring it reaches a more accurate 100% true capacity before the charging process is physically terminated.
+
+
 ---
 
 ## 🔥 Classic Features (Carried Over from Previous Builds)

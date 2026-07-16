@@ -16,7 +16,8 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 
 ---
 # BUGS Alert - What to Expect
-- "Developer Options" removed by Hiby in this new build.
+- "Developer Options" removed by Hiby in this new Beta build.
+- "ADB" is not working anymore in this build.
 - Volume getting locked multiple times
 - USB DAC and Car modes are not stable like before.
 - Partial ported theme looks broken on 1st boot. So, after flashing the firmware, restore factory settings, and then choose theme 2 from system settings.

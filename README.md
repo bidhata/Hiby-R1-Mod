@@ -6,10 +6,13 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 > ### 🎯 Target: $200 USD
 > Your support directly funds the purchase of hardware for reverse engineering and firmware testing. Next Targetted device Hiby R3 Pro II.
 > 
-> **💖 [Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**  
-
-> 
-> *Every dollar keeps this project alive and motivates future updates!*
+> **💖 [Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**
+>
+> via **USDT :** 0xcb6989985389f0a983bb20582d97e665128735e1 ( BEP20 )
+>
+> via **Paypal :** bidhata@gmail.com 
+>
+> **Every dollar keeps this project alive and motivates future updates!**
 
 ---
 # BUGS Alert - What to Expect

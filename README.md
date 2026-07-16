@@ -89,7 +89,7 @@ Your R1 can now act as a **Bluetooth DAC receiver**! Stream audio from your phon
 - Back button and disconnect dialog work flawlessly.
 - *Credit: [@japq7s](https://github.com/japq7s) for the original patch and `patch_bt_input.py` script.*
 
-### 7. Battery Charging Optimizations (AXP2101 PMIC)
+### Details about Battery Charging Optimizations (AXP2101 PMIC)
 
 To improve long-term battery health and charging accuracy, the following parameters were modified in the AXP2101 PMIC driver initialization (`axp2101.sh`):
 

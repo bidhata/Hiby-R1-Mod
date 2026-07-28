@@ -4,7 +4,7 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 >I am currently raising funds to purchase other HiBy devices to expand this modding ecosystem.
 > 
 > ### 🎯 Target: $200 USD
-> Your support directly funds the purchase of hardware for reverse engineering and firmware testing. Next Targetted device Hiby R3 Pro II.
+> Your support directly funds the purchase of hardware for reverse engineering and firmware testing. Next Targeted devicees - Hiby R3 Pro II, Hiditzs AP80 Pro-X, Tempotec V1 and others
 > 
 > **💖 [Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**
 >

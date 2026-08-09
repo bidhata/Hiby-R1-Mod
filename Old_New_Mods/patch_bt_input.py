@@ -70,7 +70,7 @@ def main():
     move_instr, = struct.unpack('<I', data[menu_start_idx+4:menu_start_idx+8])
     jal_instr, = struct.unpack('<I', data[menu_start_idx+8:menu_start_idx+12])
     
-    if (lui_instr >> 16) != 0x3c05 or move_instr != 0x02402025 or (jal_instr >> 26) != 0x0c:
+    if (lui_instr >> 16) != 0x3c05 or move_instr != 0x02402025 or (jal_instr >> 26) != 0x03:
         print("Error: Menu builder sequence mismatch. Has it already been patched with a code cave?")
         sys.exit(1)
         

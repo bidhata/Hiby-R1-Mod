@@ -8,8 +8,31 @@
 #define F_H 0x20
 #define F_C 0x10
 
-#define READ(gb, a)    gb_mmu_read(&(gb)->mmu, (gb), (a))
-#define WRITE(gb, a, v) gb_mmu_write(&(gb)->mmu, (gb), (a), (v))
+/* Every memory access occupies one four-cycle machine cycle, and the access
+ * lands at the end of it. Ticking the rest of the hardware here is what keeps
+ * a timer read inside an instruction returning the value the real chip would
+ * have had at that point. cpu.tick_acc records what an instruction has already
+ * ticked so gb_cpu_step can settle the difference afterwards. */
+static inline void cpu_tick(gb_t *gb, int cycles) {
+    gb->cpu.tick_acc += cycles;
+    gb_tick(gb, cycles);
+}
+
+static inline u8 cpu_read(gb_t *gb, u16 addr) {
+    cpu_tick(gb, 4);
+    return gb_mmu_read(&gb->mmu, gb, addr);
+}
+
+static inline void cpu_write(gb_t *gb, u16 addr, u8 val) {
+    cpu_tick(gb, 4);
+    gb_mmu_write(&gb->mmu, gb, addr, val);
+}
+
+#define READ(gb, a)    cpu_read((gb), (a))
+#define WRITE(gb, a, v) cpu_write((gb), (a), (v))
+
+/* An internal machine cycle: the CPU is busy but touches no memory. */
+#define INTERNAL(gb) cpu_tick((gb), 4)
 
 typedef int (*cpu_op_t)(gb_t *gb);
 static cpu_op_t cb_ops[256];
@@ -27,6 +50,9 @@ static inline u16 fetch_word(gb_t *gb) {
 }
 
 static inline void push_u16(gb_t *gb, u16 val) {
+    /* The stack pointer is decremented in an internal cycle that runs before
+     * either byte reaches memory. */
+    INTERNAL(gb);
     gb->cpu.reg.sp -= 2;
     WRITE(gb, gb->cpu.reg.sp + 1, (u8)(val >> 8));
     WRITE(gb, gb->cpu.reg.sp, (u8)(val & 0xFF));
@@ -198,6 +224,43 @@ static inline u8 rotate_right_carry(gb_t *gb, u8 val) {
     return val;
 }
 
+/* CB-prefixed rotates differ from the accumulator forms: they set Z. */
+static inline u8 cb_rotate_left(gb_t *gb, u8 val) {
+    u8 r = (u8)((val << 1) | (val >> 7));
+    SET_Z(&gb->cpu, r == 0);
+    SET_N(&gb->cpu, 0);
+    SET_H(&gb->cpu, 0);
+    SET_C(&gb->cpu, (val & 0x80) != 0);
+    return r;
+}
+
+static inline u8 cb_rotate_right(gb_t *gb, u8 val) {
+    u8 r = (u8)((val >> 1) | (val << 7));
+    SET_Z(&gb->cpu, r == 0);
+    SET_N(&gb->cpu, 0);
+    SET_H(&gb->cpu, 0);
+    SET_C(&gb->cpu, (val & 1) != 0);
+    return r;
+}
+
+static inline u8 cb_rotate_left_carry(gb_t *gb, u8 val) {
+    u8 r = (u8)((val << 1) | ((gb->cpu.reg.f & F_C) ? 1 : 0));
+    SET_Z(&gb->cpu, r == 0);
+    SET_N(&gb->cpu, 0);
+    SET_H(&gb->cpu, 0);
+    SET_C(&gb->cpu, (val & 0x80) != 0);
+    return r;
+}
+
+static inline u8 cb_rotate_right_carry(gb_t *gb, u8 val) {
+    u8 r = (u8)((val >> 1) | ((gb->cpu.reg.f & F_C) ? 0x80 : 0));
+    SET_Z(&gb->cpu, r == 0);
+    SET_N(&gb->cpu, 0);
+    SET_H(&gb->cpu, 0);
+    SET_C(&gb->cpu, (val & 1) != 0);
+    return r;
+}
+
 static inline u8 shift_left_arith(gb_t *gb, u8 val) {
     SET_C(&gb->cpu, (val & 0x80) != 0);
     val <<= 1;
@@ -236,21 +299,27 @@ static inline u8 swap_nibbles(gb_t *gb, u8 val) {
 
 static inline void daa(gb_t *gb) {
     int a = gb->cpu.reg.a;
+    int carry = (gb->cpu.reg.f & F_C) != 0;
+    int half = (gb->cpu.reg.f & F_H) != 0;
+
     if (!(gb->cpu.reg.f & F_N)) {
-        if (gb->cpu.reg.f & F_H || (a & 0xF) > 9) a += 6;
-        if (gb->cpu.reg.f & F_C || a > 0x9F) a += 0x60;
+        /* After an addition, carry is set whenever the high nibble is fixed up. */
+        if (half || (a & 0x0F) > 0x09) a += 0x06;
+        if (carry || a > 0x9F) { a += 0x60; carry = 1; }
     } else {
-        if (gb->cpu.reg.f & F_H) a = (a - 6) & 0xFF;
-        if (gb->cpu.reg.f & F_C) a -= 0x60;
+        /* After a subtraction, the carry flag is preserved. */
+        if (half) a = (a - 0x06) & 0xFF;
+        if (carry) a -= 0x60;
     }
+
     gb->cpu.reg.a = (u8)a;
     SET_Z(&gb->cpu, gb->cpu.reg.a == 0);
     SET_H(&gb->cpu, 0);
-    if (a & 0x100) SET_C(&gb->cpu, 1);
+    SET_C(&gb->cpu, carry);
 }
 
 /* ========== Main opcodes 0x00 - 0x3F ========== */
-static int op_00(gb_t *gb) { return 4; } /* NOP */
+static int op_00(gb_t *gb) { (void)gb; return 4; } /* NOP */
 static int op_01(gb_t *gb) { gb->cpu.reg.bc = fetch_word(gb); return 12; } /* LD BC,d16 */
 static int op_02(gb_t *gb) { WRITE(gb, gb->cpu.reg.bc, gb->cpu.reg.a); return 8; } /* LD (BC),A */
 static int op_03(gb_t *gb) { gb->cpu.reg.bc++; return 8; } /* INC BC */
@@ -266,7 +335,9 @@ static int op_0C(gb_t *gb) { gb->cpu.reg.c = alu_inc(gb, gb->cpu.reg.c); return 
 static int op_0D(gb_t *gb) { gb->cpu.reg.c = alu_dec(gb, gb->cpu.reg.c); return 4; } /* DEC C */
 static int op_0E(gb_t *gb) { gb->cpu.reg.c = fetch_byte(gb); return 8; } /* LD C,d8 */
 static int op_0F(gb_t *gb) { gb->cpu.reg.a = rotate_right(gb, gb->cpu.reg.a); return 4; } /* RRCA */
-static int op_10(gb_t *gb) { fetch_byte(gb); return 4; } /* STOP */
+/* STOP is two bytes but only four cycles: the second byte is skipped without a
+ * memory cycle of its own. */
+static int op_10(gb_t *gb) { gb->cpu.reg.pc++; return 4; } /* STOP */
 static int op_11(gb_t *gb) { gb->cpu.reg.de = fetch_word(gb); return 12; } /* LD DE,d16 */
 static int op_12(gb_t *gb) { WRITE(gb, gb->cpu.reg.de, gb->cpu.reg.a); return 8; } /* LD (DE),A */
 static int op_13(gb_t *gb) { gb->cpu.reg.de++; return 8; } /* INC DE */
@@ -316,7 +387,7 @@ static int op_3E(gb_t *gb) { gb->cpu.reg.a = fetch_byte(gb); return 8; } /* LD A
 static int op_3F(gb_t *gb) { SET_N(&gb->cpu, 0); SET_H(&gb->cpu, 0); SET_C(&gb->cpu, !(gb->cpu.reg.f & F_C)); return 4; } /* CCF */
 
 /* ========== Main opcodes 0x40 - 0x7F (LD r,r') ========== */
-static int op_40(gb_t *gb) { return 4; } /* LD B,B */
+static int op_40(gb_t *gb) { (void)gb; return 4; } /* LD B,B */
 static int op_41(gb_t *gb) { gb->cpu.reg.b = gb->cpu.reg.c; return 4; } /* LD B,C */
 static int op_42(gb_t *gb) { gb->cpu.reg.b = gb->cpu.reg.d; return 4; } /* LD B,D */
 static int op_43(gb_t *gb) { gb->cpu.reg.b = gb->cpu.reg.e; return 4; } /* LD B,E */
@@ -325,7 +396,7 @@ static int op_45(gb_t *gb) { gb->cpu.reg.b = gb->cpu.reg.l; return 4; } /* LD B,
 static int op_46(gb_t *gb) { gb->cpu.reg.b = READ(gb, gb->cpu.reg.hl); return 8; } /* LD B,(HL) */
 static int op_47(gb_t *gb) { gb->cpu.reg.b = gb->cpu.reg.a; return 4; } /* LD B,A */
 static int op_48(gb_t *gb) { gb->cpu.reg.c = gb->cpu.reg.b; return 4; } /* LD C,B */
-static int op_49(gb_t *gb) { return 4; } /* LD C,C */
+static int op_49(gb_t *gb) { (void)gb; return 4; } /* LD C,C */
 static int op_4A(gb_t *gb) { gb->cpu.reg.c = gb->cpu.reg.d; return 4; } /* LD C,D */
 static int op_4B(gb_t *gb) { gb->cpu.reg.c = gb->cpu.reg.e; return 4; } /* LD C,E */
 static int op_4C(gb_t *gb) { gb->cpu.reg.c = gb->cpu.reg.h; return 4; } /* LD C,H */
@@ -334,7 +405,7 @@ static int op_4E(gb_t *gb) { gb->cpu.reg.c = READ(gb, gb->cpu.reg.hl); return 8;
 static int op_4F(gb_t *gb) { gb->cpu.reg.c = gb->cpu.reg.a; return 4; } /* LD C,A */
 static int op_50(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.b; return 4; } /* LD D,B */
 static int op_51(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.c; return 4; } /* LD D,C */
-static int op_52(gb_t *gb) { return 4; } /* LD D,D */
+static int op_52(gb_t *gb) { (void)gb; return 4; } /* LD D,D */
 static int op_53(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.e; return 4; } /* LD D,E */
 static int op_54(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.h; return 4; } /* LD D,H */
 static int op_55(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.l; return 4; } /* LD D,L */
@@ -343,7 +414,7 @@ static int op_57(gb_t *gb) { gb->cpu.reg.d = gb->cpu.reg.a; return 4; } /* LD D,
 static int op_58(gb_t *gb) { gb->cpu.reg.e = gb->cpu.reg.b; return 4; } /* LD E,B */
 static int op_59(gb_t *gb) { gb->cpu.reg.e = gb->cpu.reg.c; return 4; } /* LD E,C */
 static int op_5A(gb_t *gb) { gb->cpu.reg.e = gb->cpu.reg.d; return 4; } /* LD E,D */
-static int op_5B(gb_t *gb) { return 4; } /* LD E,E */
+static int op_5B(gb_t *gb) { (void)gb; return 4; } /* LD E,E */
 static int op_5C(gb_t *gb) { gb->cpu.reg.e = gb->cpu.reg.h; return 4; } /* LD E,H */
 static int op_5D(gb_t *gb) { gb->cpu.reg.e = gb->cpu.reg.l; return 4; } /* LD E,L */
 static int op_5E(gb_t *gb) { gb->cpu.reg.e = READ(gb, gb->cpu.reg.hl); return 8; } /* LD E,(HL) */
@@ -352,7 +423,7 @@ static int op_60(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.b; return 4; } /* LD H,
 static int op_61(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.c; return 4; } /* LD H,C */
 static int op_62(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.d; return 4; } /* LD H,D */
 static int op_63(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.e; return 4; } /* LD H,E */
-static int op_64(gb_t *gb) { return 4; } /* LD H,H */
+static int op_64(gb_t *gb) { (void)gb; return 4; } /* LD H,H */
 static int op_65(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.l; return 4; } /* LD H,L */
 static int op_66(gb_t *gb) { gb->cpu.reg.h = READ(gb, gb->cpu.reg.hl); return 8; } /* LD H,(HL) */
 static int op_67(gb_t *gb) { gb->cpu.reg.h = gb->cpu.reg.a; return 4; } /* LD H,A */
@@ -361,7 +432,7 @@ static int op_69(gb_t *gb) { gb->cpu.reg.l = gb->cpu.reg.c; return 4; } /* LD L,
 static int op_6A(gb_t *gb) { gb->cpu.reg.l = gb->cpu.reg.d; return 4; } /* LD L,D */
 static int op_6B(gb_t *gb) { gb->cpu.reg.l = gb->cpu.reg.e; return 4; } /* LD L,E */
 static int op_6C(gb_t *gb) { gb->cpu.reg.l = gb->cpu.reg.h; return 4; } /* LD L,H */
-static int op_6D(gb_t *gb) { return 4; } /* LD L,L */
+static int op_6D(gb_t *gb) { (void)gb; return 4; } /* LD L,L */
 static int op_6E(gb_t *gb) { gb->cpu.reg.l = READ(gb, gb->cpu.reg.hl); return 8; } /* LD L,(HL) */
 static int op_6F(gb_t *gb) { gb->cpu.reg.l = gb->cpu.reg.a; return 4; } /* LD L,A */
 static int op_70(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, gb->cpu.reg.b); return 8; } /* LD (HL),B */
@@ -379,7 +450,7 @@ static int op_7B(gb_t *gb) { gb->cpu.reg.a = gb->cpu.reg.e; return 4; } /* LD A,
 static int op_7C(gb_t *gb) { gb->cpu.reg.a = gb->cpu.reg.h; return 4; } /* LD A,H */
 static int op_7D(gb_t *gb) { gb->cpu.reg.a = gb->cpu.reg.l; return 4; } /* LD A,L */
 static int op_7E(gb_t *gb) { gb->cpu.reg.a = READ(gb, gb->cpu.reg.hl); return 8; } /* LD A,(HL) */
-static int op_7F(gb_t *gb) { return 4; } /* LD A,A */
+static int op_7F(gb_t *gb) { (void)gb; return 4; } /* LD A,A */
 
 /* ========== Main opcodes 0x80 - 0xBF (ALU A,r) ========== */
 static int op_80(gb_t *gb) { gb->cpu.reg.a = alu_add(gb, gb->cpu.reg.a, gb->cpu.reg.b, 0); return 4; }
@@ -470,40 +541,40 @@ static int op_CF(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x08
 static int op_D0(gb_t *gb) { if (!(gb->cpu.reg.f & F_C)) { gb->cpu.reg.pc = pop_u16(gb); return 20; } return 8; } /* RET NC */
 static int op_D1(gb_t *gb) { gb->cpu.reg.de = pop_u16(gb); return 12; } /* POP DE */
 static int op_D2(gb_t *gb) { u16 a16 = fetch_word(gb); if (!(gb->cpu.reg.f & F_C)) { gb->cpu.reg.pc = a16; return 16; } return 12; } /* JP NC,a16 */
-static int op_D3(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_D3(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_D4(gb_t *gb) { u16 a16 = fetch_word(gb); if (!(gb->cpu.reg.f & F_C)) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = a16; return 24; } return 12; } /* CALL NC,a16 */
 static int op_D5(gb_t *gb) { push_u16(gb, gb->cpu.reg.de); return 16; } /* PUSH DE */
 static int op_D6(gb_t *gb) { gb->cpu.reg.a = alu_sub(gb, gb->cpu.reg.a, fetch_byte(gb), 0); return 8; } /* SUB d8 */
 static int op_D7(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x10; return 16; } /* RST 10H */
 static int op_D8(gb_t *gb) { if (gb->cpu.reg.f & F_C) { gb->cpu.reg.pc = pop_u16(gb); return 20; } return 8; } /* RET C */
-static int op_D9(gb_t *gb) { gb->cpu.reg.pc = pop_u16(gb); gb->cpu.ime = 1; return 16; } /* RETI */
+static int op_D9(gb_t *gb) { gb->cpu.reg.pc = pop_u16(gb); gb->cpu.ime = 1; gb->cpu.ime_pending = 0; return 16; } /* RETI */
 static int op_DA(gb_t *gb) { u16 a16 = fetch_word(gb); if (gb->cpu.reg.f & F_C) { gb->cpu.reg.pc = a16; return 16; } return 12; } /* JP C,a16 */
-static int op_DB(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_DB(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_DC(gb_t *gb) { u16 a16 = fetch_word(gb); if (gb->cpu.reg.f & F_C) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = a16; return 24; } return 12; } /* CALL C,a16 */
-static int op_DD(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_DD(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_DE(gb_t *gb) { gb->cpu.reg.a = alu_sub(gb, gb->cpu.reg.a, fetch_byte(gb), !!(gb->cpu.reg.f & F_C)); return 8; } /* SBC A,d8 */
 static int op_DF(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x18; return 16; } /* RST 18H */
 static int op_E0(gb_t *gb) { WRITE(gb, 0xFF00 + fetch_byte(gb), gb->cpu.reg.a); return 12; } /* LDH (a8),A */
 static int op_E1(gb_t *gb) { gb->cpu.reg.hl = pop_u16(gb); return 12; } /* POP HL */
 static int op_E2(gb_t *gb) { WRITE(gb, 0xFF00 + gb->cpu.reg.c, gb->cpu.reg.a); return 8; } /* LD (C),A */
-static int op_E3(gb_t *gb) { return 4; } /* ILLEGAL */
-static int op_E4(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_E3(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
+static int op_E4(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_E5(gb_t *gb) { push_u16(gb, gb->cpu.reg.hl); return 16; } /* PUSH HL */
 static int op_E6(gb_t *gb) { gb->cpu.reg.a = alu_and(gb, gb->cpu.reg.a, fetch_byte(gb)); return 8; } /* AND d8 */
 static int op_E7(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x20; return 16; } /* RST 20H */
 static int op_E8(gb_t *gb) { add_sp_r8(gb); return 16; } /* ADD SP,r8 */
 static int op_E9(gb_t *gb) { gb->cpu.reg.pc = gb->cpu.reg.hl; return 4; } /* JP (HL) */
 static int op_EA(gb_t *gb) { WRITE(gb, fetch_word(gb), gb->cpu.reg.a); return 16; } /* LD (a16),A */
-static int op_EB(gb_t *gb) { return 4; } /* ILLEGAL */
-static int op_EC(gb_t *gb) { return 4; } /* ILLEGAL */
-static int op_ED(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_EB(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
+static int op_EC(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
+static int op_ED(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_EE(gb_t *gb) { gb->cpu.reg.a = alu_xor(gb, gb->cpu.reg.a, fetch_byte(gb)); return 8; } /* XOR d8 */
 static int op_EF(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x28; return 16; } /* RST 28H */
 static int op_F0(gb_t *gb) { gb->cpu.reg.a = READ(gb, 0xFF00 + fetch_byte(gb)); return 12; } /* LDH A,(a8) */
 static int op_F1(gb_t *gb) { gb->cpu.reg.af = pop_u16(gb); gb->cpu.reg.f &= 0xF0; return 12; } /* POP AF */
 static int op_F2(gb_t *gb) { gb->cpu.reg.a = READ(gb, 0xFF00 + gb->cpu.reg.c); return 8; } /* LD A,(C) */
-static int op_F3(gb_t *gb) { gb->cpu.ime = 0; return 4; } /* DI */
-static int op_F4(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_F3(gb_t *gb) { gb->cpu.ime = 0; gb->cpu.ime_pending = 0; return 4; } /* DI */
+static int op_F4(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_F5(gb_t *gb) { push_u16(gb, gb->cpu.reg.af); return 16; } /* PUSH AF */
 static int op_F6(gb_t *gb) { gb->cpu.reg.a = alu_or(gb, gb->cpu.reg.a, fetch_byte(gb)); return 8; } /* OR d8 */
 static int op_F7(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x30; return 16; } /* RST 30H */
@@ -518,47 +589,47 @@ static int op_F8(gb_t *gb) {
 static int op_F9(gb_t *gb) { gb->cpu.reg.sp = gb->cpu.reg.hl; return 8; } /* LD SP,HL */
 static int op_FA(gb_t *gb) { gb->cpu.reg.a = READ(gb, fetch_word(gb)); return 16; } /* LD A,(a16) */
 static int op_FB(gb_t *gb) { gb->cpu.ime_pending = 1; return 4; } /* EI */
-static int op_FC(gb_t *gb) { return 4; } /* ILLEGAL */
-static int op_FD(gb_t *gb) { return 4; } /* ILLEGAL */
+static int op_FC(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
+static int op_FD(gb_t *gb) { (void)gb; return 4; } /* ILLEGAL: locks up on hardware */
 static int op_FE(gb_t *gb) { alu_cp(gb, gb->cpu.reg.a, fetch_byte(gb)); return 8; } /* CP d8 */
 static int op_FF(gb_t *gb) { push_u16(gb, gb->cpu.reg.pc); gb->cpu.reg.pc = 0x38; return 16; } /* RST 38H */
 /* ========== CB-prefixed opcodes 0x00 - 0x3F (rotates/shifts) ========== */
 /* RLC r: 0x00-0x07 */
-static int cb_00(gb_t *gb) { gb->cpu.reg.b = rotate_left(gb, gb->cpu.reg.b); return 8; }
-static int cb_01(gb_t *gb) { gb->cpu.reg.c = rotate_left(gb, gb->cpu.reg.c); return 8; }
-static int cb_02(gb_t *gb) { gb->cpu.reg.d = rotate_left(gb, gb->cpu.reg.d); return 8; }
-static int cb_03(gb_t *gb) { gb->cpu.reg.e = rotate_left(gb, gb->cpu.reg.e); return 8; }
-static int cb_04(gb_t *gb) { gb->cpu.reg.h = rotate_left(gb, gb->cpu.reg.h); return 8; }
-static int cb_05(gb_t *gb) { gb->cpu.reg.l = rotate_left(gb, gb->cpu.reg.l); return 8; }
-static int cb_06(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, rotate_left(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
-static int cb_07(gb_t *gb) { gb->cpu.reg.a = rotate_left(gb, gb->cpu.reg.a); return 8; }
+static int cb_00(gb_t *gb) { gb->cpu.reg.b = cb_rotate_left(gb, gb->cpu.reg.b); return 8; }
+static int cb_01(gb_t *gb) { gb->cpu.reg.c = cb_rotate_left(gb, gb->cpu.reg.c); return 8; }
+static int cb_02(gb_t *gb) { gb->cpu.reg.d = cb_rotate_left(gb, gb->cpu.reg.d); return 8; }
+static int cb_03(gb_t *gb) { gb->cpu.reg.e = cb_rotate_left(gb, gb->cpu.reg.e); return 8; }
+static int cb_04(gb_t *gb) { gb->cpu.reg.h = cb_rotate_left(gb, gb->cpu.reg.h); return 8; }
+static int cb_05(gb_t *gb) { gb->cpu.reg.l = cb_rotate_left(gb, gb->cpu.reg.l); return 8; }
+static int cb_06(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, cb_rotate_left(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
+static int cb_07(gb_t *gb) { gb->cpu.reg.a = cb_rotate_left(gb, gb->cpu.reg.a); return 8; }
 /* RRC r: 0x08-0x0F */
-static int cb_08(gb_t *gb) { gb->cpu.reg.b = rotate_right(gb, gb->cpu.reg.b); return 8; }
-static int cb_09(gb_t *gb) { gb->cpu.reg.c = rotate_right(gb, gb->cpu.reg.c); return 8; }
-static int cb_0A(gb_t *gb) { gb->cpu.reg.d = rotate_right(gb, gb->cpu.reg.d); return 8; }
-static int cb_0B(gb_t *gb) { gb->cpu.reg.e = rotate_right(gb, gb->cpu.reg.e); return 8; }
-static int cb_0C(gb_t *gb) { gb->cpu.reg.h = rotate_right(gb, gb->cpu.reg.h); return 8; }
-static int cb_0D(gb_t *gb) { gb->cpu.reg.l = rotate_right(gb, gb->cpu.reg.l); return 8; }
-static int cb_0E(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, rotate_right(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
-static int cb_0F(gb_t *gb) { gb->cpu.reg.a = rotate_right(gb, gb->cpu.reg.a); return 8; }
+static int cb_08(gb_t *gb) { gb->cpu.reg.b = cb_rotate_right(gb, gb->cpu.reg.b); return 8; }
+static int cb_09(gb_t *gb) { gb->cpu.reg.c = cb_rotate_right(gb, gb->cpu.reg.c); return 8; }
+static int cb_0A(gb_t *gb) { gb->cpu.reg.d = cb_rotate_right(gb, gb->cpu.reg.d); return 8; }
+static int cb_0B(gb_t *gb) { gb->cpu.reg.e = cb_rotate_right(gb, gb->cpu.reg.e); return 8; }
+static int cb_0C(gb_t *gb) { gb->cpu.reg.h = cb_rotate_right(gb, gb->cpu.reg.h); return 8; }
+static int cb_0D(gb_t *gb) { gb->cpu.reg.l = cb_rotate_right(gb, gb->cpu.reg.l); return 8; }
+static int cb_0E(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, cb_rotate_right(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
+static int cb_0F(gb_t *gb) { gb->cpu.reg.a = cb_rotate_right(gb, gb->cpu.reg.a); return 8; }
 /* RL r: 0x10-0x17 */
-static int cb_10(gb_t *gb) { gb->cpu.reg.b = rotate_left_carry(gb, gb->cpu.reg.b); return 8; }
-static int cb_11(gb_t *gb) { gb->cpu.reg.c = rotate_left_carry(gb, gb->cpu.reg.c); return 8; }
-static int cb_12(gb_t *gb) { gb->cpu.reg.d = rotate_left_carry(gb, gb->cpu.reg.d); return 8; }
-static int cb_13(gb_t *gb) { gb->cpu.reg.e = rotate_left_carry(gb, gb->cpu.reg.e); return 8; }
-static int cb_14(gb_t *gb) { gb->cpu.reg.h = rotate_left_carry(gb, gb->cpu.reg.h); return 8; }
-static int cb_15(gb_t *gb) { gb->cpu.reg.l = rotate_left_carry(gb, gb->cpu.reg.l); return 8; }
-static int cb_16(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, rotate_left_carry(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
-static int cb_17(gb_t *gb) { gb->cpu.reg.a = rotate_left_carry(gb, gb->cpu.reg.a); return 8; }
+static int cb_10(gb_t *gb) { gb->cpu.reg.b = cb_rotate_left_carry(gb, gb->cpu.reg.b); return 8; }
+static int cb_11(gb_t *gb) { gb->cpu.reg.c = cb_rotate_left_carry(gb, gb->cpu.reg.c); return 8; }
+static int cb_12(gb_t *gb) { gb->cpu.reg.d = cb_rotate_left_carry(gb, gb->cpu.reg.d); return 8; }
+static int cb_13(gb_t *gb) { gb->cpu.reg.e = cb_rotate_left_carry(gb, gb->cpu.reg.e); return 8; }
+static int cb_14(gb_t *gb) { gb->cpu.reg.h = cb_rotate_left_carry(gb, gb->cpu.reg.h); return 8; }
+static int cb_15(gb_t *gb) { gb->cpu.reg.l = cb_rotate_left_carry(gb, gb->cpu.reg.l); return 8; }
+static int cb_16(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, cb_rotate_left_carry(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
+static int cb_17(gb_t *gb) { gb->cpu.reg.a = cb_rotate_left_carry(gb, gb->cpu.reg.a); return 8; }
 /* RR r: 0x18-0x1F */
-static int cb_18(gb_t *gb) { gb->cpu.reg.b = rotate_right_carry(gb, gb->cpu.reg.b); return 8; }
-static int cb_19(gb_t *gb) { gb->cpu.reg.c = rotate_right_carry(gb, gb->cpu.reg.c); return 8; }
-static int cb_1A(gb_t *gb) { gb->cpu.reg.d = rotate_right_carry(gb, gb->cpu.reg.d); return 8; }
-static int cb_1B(gb_t *gb) { gb->cpu.reg.e = rotate_right_carry(gb, gb->cpu.reg.e); return 8; }
-static int cb_1C(gb_t *gb) { gb->cpu.reg.h = rotate_right_carry(gb, gb->cpu.reg.h); return 8; }
-static int cb_1D(gb_t *gb) { gb->cpu.reg.l = rotate_right_carry(gb, gb->cpu.reg.l); return 8; }
-static int cb_1E(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, rotate_right_carry(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
-static int cb_1F(gb_t *gb) { gb->cpu.reg.a = rotate_right_carry(gb, gb->cpu.reg.a); return 8; }
+static int cb_18(gb_t *gb) { gb->cpu.reg.b = cb_rotate_right_carry(gb, gb->cpu.reg.b); return 8; }
+static int cb_19(gb_t *gb) { gb->cpu.reg.c = cb_rotate_right_carry(gb, gb->cpu.reg.c); return 8; }
+static int cb_1A(gb_t *gb) { gb->cpu.reg.d = cb_rotate_right_carry(gb, gb->cpu.reg.d); return 8; }
+static int cb_1B(gb_t *gb) { gb->cpu.reg.e = cb_rotate_right_carry(gb, gb->cpu.reg.e); return 8; }
+static int cb_1C(gb_t *gb) { gb->cpu.reg.h = cb_rotate_right_carry(gb, gb->cpu.reg.h); return 8; }
+static int cb_1D(gb_t *gb) { gb->cpu.reg.l = cb_rotate_right_carry(gb, gb->cpu.reg.l); return 8; }
+static int cb_1E(gb_t *gb) { WRITE(gb, gb->cpu.reg.hl, cb_rotate_right_carry(gb, READ(gb, gb->cpu.reg.hl))); return 16; }
+static int cb_1F(gb_t *gb) { gb->cpu.reg.a = cb_rotate_right_carry(gb, gb->cpu.reg.a); return 8; }
 /* SLA r: 0x20-0x27 */
 static int cb_20(gb_t *gb) { gb->cpu.reg.b = shift_left_arith(gb, gb->cpu.reg.b); return 8; }
 static int cb_21(gb_t *gb) { gb->cpu.reg.c = shift_left_arith(gb, gb->cpu.reg.c); return 8; }
@@ -910,41 +981,57 @@ void gb_cpu_trigger_interrupt(gb_t *gb, int flag) {
 }
 
 static int handle_interrupts(gb_t *gb) {
-    u8 ie = gb->ie;
-    u8 iflag = gb->io[0x0F];
-    u8 pending = ie & iflag & 0x1F;
+    u8 pending = gb->ie & gb->io[0x0F] & 0x1F;
     if (!pending) return 0;
-    if (gb->cpu.ime) {
-        for (int i = 0; i < 5; i++) {
-            if (pending & (1 << i)) {
-                gb->cpu.ime = 0;
-                gb->io[0x0F] &= ~(1 << i);
-                push_u16(gb, gb->cpu.reg.pc);
-                gb->cpu.reg.pc = 0x40 + (i * 8);
-                return 20;
-            }
+
+    /* A pending interrupt wakes the CPU even when IME is clear. */
+    gb->cpu.halted = false;
+
+    if (!gb->cpu.ime) return 0;
+
+    for (int i = 0; i < 5; i++) {
+        if (pending & (1 << i)) {
+            gb->cpu.ime = 0;
+            gb->cpu.ime_pending = 0;
+            gb->io[0x0F] &= ~(1 << i);
+            /* Two internal cycles precede the push; the second overlaps the
+             * jump to the handler. */
+            INTERNAL(gb);
+            push_u16(gb, gb->cpu.reg.pc);
+            gb->cpu.reg.pc = (u16)(0x40 + (i * 8));
+            return 20;
         }
     }
     return 0;
 }
 
 int gb_cpu_step(gb_cpu_t *cpu, gb_t *gb) {
-    int cycles = 0;
+    /* EI takes effect only after the instruction that follows it. */
+    bool enable_ime_after = cpu->ime_pending;
 
-    if (cpu->ime_pending) {
-        cpu->ime = 1;
-        cpu->ime_pending = 0;
+    cpu->tick_acc = 0;
+
+    int cycles = handle_interrupts(gb);
+    if (cycles == 0) {
+        if (cpu->halted) {
+            cycles = 4;
+        } else {
+            u8 opcode = fetch_byte(gb);
+            cycles = ops[opcode](gb);
+
+            if (enable_ime_after && cpu->ime_pending) {
+                cpu->ime = 1;
+                cpu->ime_pending = 0;
+            }
+        }
     }
 
-    cycles += handle_interrupts(gb);
-
-    if (cpu->halted) {
-        cpu->cycles += 4;
-        return 4;
+    /* Memory accesses have already ticked the hardware in step with the
+     * instruction; hand over whatever internal cycles are left. */
+    if (cycles > cpu->tick_acc) {
+        gb_tick(gb, cycles - cpu->tick_acc);
     }
 
-    u8 opcode = fetch_byte(gb);
-    cycles += ops[opcode](gb);
     cpu->cycles += cycles;
     return cycles;
 }

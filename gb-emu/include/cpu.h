@@ -47,6 +47,9 @@ typedef struct {
     s32 cycles;
     int div_counter;
     int tima_counter;
+    /* T-cycles the current instruction has already handed to the rest of the
+     * hardware, so gb_cpu_step can tick whatever is left over at the end. */
+    int tick_acc;
 } gb_cpu_t;
 
 void gb_cpu_init(gb_cpu_t *cpu);

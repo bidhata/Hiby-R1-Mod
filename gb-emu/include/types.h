@@ -15,6 +15,9 @@ typedef int32_t s32;
 #define GB_WIDTH  160
 #define GB_HEIGHT 144
 
+/* Master clock of the DMG in T-cycles per second. */
+#define GB_CPU_FREQ 4194304
+
 #define CYCLES_PER_FRAME 70224
 #define T_CYCLES_PER_FRAME (CYCLES_PER_FRAME / 4)
 

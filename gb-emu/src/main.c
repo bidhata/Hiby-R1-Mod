@@ -5,235 +5,137 @@
 #include "mmu.h"
 #include "apu.h"
 #include "platform.h"
+#include "menu.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include <unistd.h>
 
-static volatile int running = 1;
+/* Exit status telling the boot script to start the HiBy music player. Anything
+ * that starts gb-emu at boot is responsible for acting on this; the emulator
+ * deliberately does not exec the player itself, so the player keeps being
+ * started the same way the stock firmware starts it. */
+#define GB_EXIT_RUN_PLAYER 10
 
-/* Candidate mount points for the SD card, in priority order. */
-static const char *sd_mounts[] = {
-    "/mnt/sd_0",
-    "/mnt/sd_1",
-    "/data/mnt/sd_0",
-    "/data/mnt/sd_1",
-    NULL
-};
-
-/* ROM filename extensions, in priority order. */
-static const char *rom_exts[] = { ".gb", ".gbc", ".GBC", ".GB", NULL };
-
-static int has_suffix(const char *name, const char *suffix) {
-    size_t nlen = strlen(name);
-    size_t slen = strlen(suffix);
-    if (slen > nlen) return 0;
-    return strcmp(name + nlen - slen, suffix) == 0;
-}
-
-/* Find the first ROM inside <mount>/games/. Returns 0 with a
- * malloc'd path on success, -1 if none found. */
-static int find_sd_rom(char *out, size_t out_size) {
-    for (int m = 0; sd_mounts[m]; m++) {
-        char games[256];
-        snprintf(games, sizeof(games), "%s/games", sd_mounts[m]);
-
-        struct stat st;
-        if (stat(games, &st) != 0 || !S_ISDIR(st.st_mode)) {
-            continue;
-        }
-
-        DIR *dir = opendir(games);
-        if (!dir) continue;
-
-        struct dirent *ent;
-        while ((ent = readdir(dir)) != NULL) {
-            if (ent->d_name[0] == '.') continue;
-            for (int e = 0; rom_exts[e]; e++) {
-                if (has_suffix(ent->d_name, rom_exts[e])) {
-                    char path[512];
-                    snprintf(path, sizeof(path), "%s/%s", games, ent->d_name);
-                    struct stat fst;
-                    if (stat(path, &fst) == 0 && S_ISREG(fst.st_mode)) {
-                        snprintf(out, out_size, "%s", path);
-                        closedir(dir);
-                        return 0;
-                    }
-                }
-            }
-        }
-        closedir(dir);
-    }
-    return -1;
-}
+static volatile sig_atomic_t running = 1;
 
 static void signal_handler(int sig) {
     (void)sig;
     running = 0;
 }
 
-int gb_init(gb_t *gb) {
-    memset(gb, 0, sizeof(gb_t));
+/* Runs one ROM until the user quits it. Returns 0 normally, -1 if the ROM
+ * could not be loaded. */
+static int run_rom(gb_platform_t *platform, const char *rom_path) {
+    static gb_t gb;
 
-    gb_cpu_init(&gb->cpu);
-    gb_ppu_init(&gb->ppu);
-    gb_apu_init(&gb->apu);
-
-    gb->cpu.reg.af = 0x01B0;
-    gb->cpu.reg.bc = 0x0013;
-    gb->cpu.reg.de = 0x00D8;
-    gb->cpu.reg.hl = 0x014D;
-    gb->cpu.reg.sp = 0xFFFE;
-    gb->cpu.reg.pc = 0x0100;
-
-    gb->io[0x05] = 0x00;
-    gb->io[0x06] = 0x00;
-    gb->io[0x07] = 0x00;
-    gb->io[0x0F] = 0xE1;
-    gb->io[0x10] = 0x80;
-    gb->io[0x11] = 0xBF;
-    gb->io[0x12] = 0xF3;
-    gb->io[0x14] = 0xBF;
-    gb->io[0x16] = 0x3F;
-    gb->io[0x17] = 0x00;
-    gb->io[0x19] = 0xBF;
-    gb->io[0x1A] = 0x7F;
-    gb->io[0x1B] = 0xFF;
-    gb->io[0x1C] = 0x9F;
-    gb->io[0x1E] = 0xBF;
-    gb->io[0x20] = 0xFF;
-    gb->io[0x21] = 0x00;
-    gb->io[0x22] = 0x00;
-    gb->io[0x23] = 0xBF;
-    gb->io[0x24] = 0x77;
-    gb->io[0x25] = 0xF3;
-    gb->io[0x26] = 0xF1;
-    gb->io[0x40] = 0x91;
-    gb->io[0x42] = 0x00;
-    gb->io[0x43] = 0x00;
-    gb->io[0x45] = 0x00;
-    gb->io[0x47] = 0xFC;
-    gb->io[0x48] = 0xFF;
-    gb->io[0x49] = 0xFF;
-    gb->io[0x4A] = 0x00;
-    gb->io[0x4B] = 0x00;
-    gb->io[0x50] = 0xFF;
-
-    gb->joypad_state = 0xFF;
-    gb->cart_loaded = false;
-    gb->state = GB_STATE_STOPPED;
-    gb->frame_count = 0;
-
-    return 0;
-}
-
-void gb_destroy(gb_t *gb) {
-    if (gb->mmu.rom_data) {
-        free(gb->mmu.rom_data);
-        gb->mmu.rom_data = NULL;
-    }
-    gb->cart_loaded = false;
-}
-
-int gb_load_rom(gb_t *gb, const char *path) {
-    return gb_mmu_load_rom(&gb->mmu, path);
-}
-
-void gb_run_frame(gb_t *gb) {
-    gb->ppu.frame_ready = false;
-
-    while (!gb->ppu.frame_ready) {
-        int cycles = gb_cpu_step(&gb->cpu, gb);
-        gb_ppu_step(&gb->ppu, gb, cycles);
-        gb_apu_step(&gb->apu, gb, cycles);
-
-        gb->io[0x04]++;
-
-        if (gb->io[0x07] & 0x04) {
-            gb->io[0x05]++;
-            if (gb->io[0x05] == 0) {
-                gb->io[0x05] = gb->io[0x06];
-                gb->io[0x0F] |= 0x04;
-            }
-        }
-    }
-
-    gb->frame_count++;
-}
-
-void gb_reset(gb_t *gb) {
-    gb_cpu_init(&gb->cpu);
-    gb_ppu_init(&gb->ppu);
-    gb_apu_init(&gb->apu);
-
-    gb->cpu.reg.af = 0x01B0;
-    gb->cpu.reg.bc = 0x0013;
-    gb->cpu.reg.de = 0x00D8;
-    gb->cpu.reg.hl = 0x014D;
-    gb->cpu.reg.sp = 0xFFFE;
-    gb->cpu.reg.pc = 0x0100;
-
-    memset(gb->io, 0, sizeof(gb->io));
-    gb->io[0x50] = 0xFF;
-}
-
-int main(int argc, char *argv[]) {
-    char rom_path[512];
-    const char *rom_arg = NULL;
-
-    if (argc >= 2) {
-        rom_arg = argv[1];
-    } else {
-        /* No ROM given: auto-detect from SD card games/ folder. */
-        if (find_sd_rom(rom_path, sizeof(rom_path)) != 0) {
-            fprintf(stderr, "No ROM found. Put .gb/.gbc files in SD card games/ folder.\n");
-            fprintf(stderr, "Usage: gb-emu <rom.gb>\n");
-            return 1;
-        }
-        printf("Auto-detected ROM: %s\n", rom_path);
-        rom_arg = rom_path;
-    }
-
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-
-    gb_t gb;
     gb_init(&gb);
-
-    if (gb_load_rom(&gb, rom_arg) != 0) {
-        fprintf(stderr, "Failed to load ROM: %s\n", rom_arg);
-        return 1;
+    if (gb_load_rom(&gb, rom_path) != 0) {
+        fprintf(stderr, "Failed to load ROM: %s\n", rom_path);
+        return -1;
     }
 
-    printf("ROM loaded: %s\n", rom_arg);
-    printf("Title: %.16s\n", &gb.mmu.rom_data[0x134]);
-    printf("MBC type: %d\n", gb.mmu.mbc);
-
-    if (gb_platform_init(&gb.platform) != 0) {
-        fprintf(stderr, "Failed to initialize platform\n");
-        gb_destroy(&gb);
-        return 1;
+    char title[17];
+    memcpy(title, &gb.mmu.rom_data[0x134], 16);
+    title[16] = '\0';
+    for (int i = 0; i < 16; i++) {
+        if (title[i] != '\0' && (title[i] < 0x20 || title[i] > 0x7E)) title[i] = ' ';
     }
 
-    printf("Platform initialized. Running...\n");
+    printf("ROM loaded: %s\n", rom_path);
+    printf("Title: %s\n", title);
+    printf("MBC type: %d, ROM %zu KB, RAM %zu KB%s\n",
+           gb.mmu.mbc, gb.mmu.rom_size / 1024, gb.mmu.ram_size / 1024,
+           gb.mmu.battery ? ", battery" : "");
+
+    /* The emulator borrows the platform the menu already set up. Work through
+     * the caller's copy rather than gb.platform: input state lives in there,
+     * and a struct copy would strand every button and touch update in a
+     * duplicate that nothing else reads. */
+    gb.platform = platform;
+
+    gb_platform_clear(platform, 0xFF000000);
+    gb_platform_draw_touch_overlay(platform);
 
     gb.state = GB_STATE_RUNNING;
 
     while (gb.state == GB_STATE_RUNNING && running) {
         gb_run_frame(&gb);
-        gb_platform_update_video(&gb.platform, &gb.ppu);
-        gb_platform_update_audio(&gb.platform, &gb.apu);
-        int quit = gb_platform_poll_input(&gb.platform);
-        if (quit) gb.state = GB_STATE_STOPPED;
-        gb_platform_wait_frame(&gb.platform);
+        gb_platform_update_video(platform, &gb.ppu);
+        gb_platform_update_audio(platform, &gb.apu);
+        if (gb_platform_poll_input(platform)) {
+            gb.state = GB_STATE_STOPPED;
+        }
+        gb_platform_wait_frame(platform);
     }
 
-    gb_platform_destroy(&gb.platform);
+    /* Writes out the battery save, if the cart has one. */
     gb_destroy(&gb);
-    printf("Goodbye!\n");
     return 0;
+}
+
+static void print_usage(const char *argv0) {
+    fprintf(stderr, "Usage: %s [rom.gb]\n", argv0);
+    fprintf(stderr, "  With no ROM, shows the launcher: pick a game from the\n");
+    fprintf(stderr, "  SD card games/ folder, or hand back to the music player.\n");
+}
+
+int main(int argc, char *argv[]) {
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    if (argc >= 2 && (strcmp(argv[1], "-h") == 0 ||
+                      strcmp(argv[1], "--help") == 0)) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    static gb_platform_t platform;
+    if (gb_platform_init(&platform) != 0) {
+        fprintf(stderr, "Failed to initialize platform\n");
+        /* Without a screen there is nothing to pick from, so ask for the music
+         * player rather than leaving the device showing nothing. */
+        return argc >= 2 ? 1 : GB_EXIT_RUN_PLAYER;
+    }
+
+    /* An explicit ROM path skips the launcher entirely. */
+    if (argc >= 2) {
+        int result = run_rom(&platform, argv[1]);
+        gb_platform_destroy(&platform);
+        printf("Goodbye!\n");
+        return result == 0 ? 0 : 1;
+    }
+
+    /* No usable buttons would leave the menu impossible to answer, so hand
+     * straight back to the player instead of blocking on input forever. */
+    if (platform.input_count == 0) {
+        fprintf(stderr, "No input devices; handing back to the music player\n");
+        gb_platform_destroy(&platform);
+        return GB_EXIT_RUN_PLAYER;
+    }
+
+    /* Launcher: keep returning here when a game exits, so the user can pick
+     * another one without rebooting. */
+    int cursor = 0;
+    int exit_code = 0;
+    while (running) {
+        gb_menu_result_t choice = gb_menu_run(&platform, &cursor);
+
+        if (choice.action == GB_MENU_PLAYER) {
+            exit_code = GB_EXIT_RUN_PLAYER;
+            break;
+        }
+        if (choice.action == GB_MENU_QUIT) {
+            break;
+        }
+
+        run_rom(&platform, choice.rom_path);
+    }
+
+    gb_platform_destroy(&platform);
+    printf(exit_code == GB_EXIT_RUN_PLAYER ? "Switching to music player...\n"
+                                           : "Goodbye!\n");
+    return exit_code;
 }

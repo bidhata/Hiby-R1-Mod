@@ -44,12 +44,34 @@ typedef struct gb {
      * writes to. NULL in the headless runner, which has no input at all. */
     gb_platform_t *platform;
 
-    u8 vram[0x2000];
-    u8 wram[0x2000];
+    /* Two VRAM banks and eight WRAM banks on CGB hardware; a DMG uses only the
+     * first of each, so the extra space simply goes unused. */
+    u8 vram[0x4000];
+    u8 wram[0x8000];
     u8 oam[0xA0];
     u8 hram[0x7F];
     u8 io[0x80];
     u8 ie;
+
+    /* Game Boy Color state. cgb_mode is set when the cartridge asks for CGB
+     * features; everything below is meaningless without it. */
+    bool cgb_mode;
+    u8 vram_bank;       /* VBK, 0 or 1 */
+    u8 wram_bank;       /* SVBK, 1-7 (0 reads as 1) */
+
+    /* CPU double-speed mode: KEY1 bit 7 is the current speed, bit 0 an armed
+     * switch that STOP carries out. */
+    bool double_speed;
+    bool speed_switch_armed;
+    /* Odd CPU cycle held back when halving the clock for the PPU and APU. */
+    int tick_carry;
+
+    /* HDMA/GDMA: a block copy from ROM or RAM into VRAM, either immediate or
+     * one 16-byte block per HBlank. */
+    u16 hdma_src;
+    u16 hdma_dst;
+    u8 hdma_length;     /* blocks remaining, minus one */
+    bool hdma_active;   /* an HBlank transfer is in progress */
 
     u8 joypad_state;
     bool cart_loaded;

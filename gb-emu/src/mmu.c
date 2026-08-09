@@ -174,6 +174,74 @@ int gb_mmu_load_rom(gb_mmu_t *mmu, const char *path) {
     return 0;
 }
 
+/* VRAM is two 8 KB banks on CGB hardware, selected by VBK. */
+static inline size_t vram_offset(struct gb *gb, u16 addr) {
+    return (size_t)(gb->vram_bank ? 0x2000 : 0) + (addr - 0x8000);
+}
+
+/* WRAM is eight 4 KB banks on CGB: C000-CFFF is always bank 0, and D000-DFFF
+ * is whichever bank SVBK selects. Bank 0 there is treated as bank 1. */
+static inline size_t wram_offset(struct gb *gb, u16 addr) {
+    if (addr < 0xD000) return (size_t)(addr - 0xC000);
+
+    int bank = gb->cgb_mode ? (gb->wram_bank & 0x07) : 1;
+    if (bank == 0) bank = 1;
+    return (size_t)bank * 0x1000 + (addr - 0xD000);
+}
+
+/* Copies one 16-byte block from the HDMA source into VRAM and steps both
+ * pointers on. */
+static void hdma_copy_block(struct gb *gb) {
+    for (int i = 0; i < 16; i++) {
+        u16 src = (u16)(gb->hdma_src + i);
+        u16 dst = (u16)(0x8000 + ((gb->hdma_dst + i) & 0x1FFF));
+        /* Reading through the MMU keeps cartridge banking in play; writing
+         * direct avoids re-entering the write path for something that can only
+         * ever land in VRAM. */
+        gb->vram[vram_offset(gb, dst)] = gb_mmu_read(&gb->mmu, gb, src);
+    }
+    gb->hdma_src = (u16)(gb->hdma_src + 16);
+    gb->hdma_dst = (u16)(gb->hdma_dst + 16);
+}
+
+/* HDMA5: bit 7 picks the mode, the low bits give the length in 16-byte blocks
+ * minus one. */
+static void hdma_write_control(struct gb *gb, u8 val) {
+    if (gb->hdma_active && !(val & 0x80)) {
+        /* Writing with bit 7 clear during an HBlank transfer cancels it. */
+        gb->hdma_active = false;
+        return;
+    }
+
+    gb->hdma_length = val & 0x7F;
+
+    if (val & 0x80) {
+        /* HBlank mode: one block per HBlank, handled by gb_mmu_hdma_hblank. */
+        gb->hdma_active = true;
+        return;
+    }
+
+    /* General purpose mode: the whole block moves at once, with the CPU
+     * stopped. The cycle cost is charged by the caller of gb_tick. */
+    int blocks = gb->hdma_length + 1;
+    for (int i = 0; i < blocks; i++) hdma_copy_block(gb);
+    gb->hdma_active = false;
+    gb->hdma_length = 0xFF;
+}
+
+void gb_mmu_hdma_hblank(struct gb *gb) {
+    if (!gb->cgb_mode || !gb->hdma_active) return;
+
+    hdma_copy_block(gb);
+
+    if (gb->hdma_length == 0) {
+        gb->hdma_active = false;
+        gb->hdma_length = 0xFF;
+    } else {
+        gb->hdma_length--;
+    }
+}
+
 /* Joypad handling: bits 4 and 5 select a row, bits 0-3 read it, all active low. */
 static u8 joypad_read(struct gb *gb) {
     u8 row = gb->io[0x00];
@@ -338,7 +406,7 @@ u8 gb_mmu_read(gb_mmu_t *mmu, struct gb *gb, u16 addr) {
 
     /* VRAM: 8000-9FFF */
     if (addr < 0xA000) {
-        return gb->vram[addr - 0x8000];
+        return gb->vram[vram_offset(gb, addr)];
     }
 
     /* External RAM / RTC: A000-BFFF */
@@ -358,12 +426,13 @@ u8 gb_mmu_read(gb_mmu_t *mmu, struct gb *gb, u16 addr) {
 
     /* Work RAM: C000-DFFF */
     if (addr < 0xE000) {
-        return gb->wram[addr - 0xC000];
+        return gb->wram[wram_offset(gb, addr)];
     }
 
     /* Echo RAM: E000-FDFF mirrors C000-DDFF */
     if (addr < 0xFE00) {
-        return gb->wram[addr - 0xE000];
+        /* Echo RAM mirrors C000-DDFF, banking included. */
+        return gb->wram[wram_offset(gb, (u16)(addr - 0x2000))];
     }
 
     /* OAM: FE00-FE9F */
@@ -400,6 +469,33 @@ u8 gb_mmu_read(gb_mmu_t *mmu, struct gb *gb, u16 addr) {
         if (reg == 0x45) return gb->ppu.lyc;
         if (reg == 0x4A) return gb->ppu.wy;
         if (reg == 0x4B) return gb->ppu.wx;
+
+        /* Game Boy Color registers. On a DMG cart these are absent and read
+         * back as 0xFF, which is what software uses to tell the two apart. */
+        if (reg >= 0x4D && reg <= 0x70) {
+            if (!gb->cgb_mode) return 0xFF;
+
+            switch (reg) {
+                case 0x4D: /* KEY1: current speed and the armed switch */
+                    return (u8)((gb->double_speed ? 0x80 : 0x00) |
+                                (gb->speed_switch_armed ? 0x01 : 0x00) | 0x7E);
+                case 0x4F: return (u8)(gb->vram_bank | 0xFE);
+                case 0x51: return (u8)(gb->hdma_src >> 8);
+                case 0x52: return (u8)(gb->hdma_src & 0xFF);
+                case 0x53: return (u8)(gb->hdma_dst >> 8);
+                case 0x54: return (u8)(gb->hdma_dst & 0xFF);
+                case 0x55:
+                    /* Bit 7 clear means a transfer is still running. */
+                    return (u8)(gb->hdma_active ? (gb->hdma_length & 0x7F)
+                                                : 0xFF);
+                case 0x68: return gb->ppu.bcps;
+                case 0x69: return gb_ppu_read_cgb_palette(&gb->ppu, false);
+                case 0x6A: return gb->ppu.ocps;
+                case 0x6B: return gb_ppu_read_cgb_palette(&gb->ppu, true);
+                case 0x70: return (u8)(gb->wram_bank | 0xF8);
+                default:   return 0xFF;
+            }
+        }
 
         return gb->io[reg];
     }
@@ -495,7 +591,7 @@ void gb_mmu_write(gb_mmu_t *mmu, struct gb *gb, u16 addr, u8 val) {
 
     /* VRAM: 8000-9FFF */
     if (addr < 0xA000) {
-        gb->vram[addr - 0x8000] = val;
+        gb->vram[vram_offset(gb, addr)] = val;
         return;
     }
 
@@ -516,13 +612,13 @@ void gb_mmu_write(gb_mmu_t *mmu, struct gb *gb, u16 addr, u8 val) {
 
     /* Work RAM: C000-DFFF */
     if (addr < 0xE000) {
-        gb->wram[addr - 0xC000] = val;
+        gb->wram[wram_offset(gb, addr)] = val;
         return;
     }
 
     /* Echo RAM: E000-FDFF */
     if (addr < 0xFE00) {
-        gb->wram[addr - 0xE000] = val;
+        gb->wram[wram_offset(gb, (u16)(addr - 0x2000))] = val;
         return;
     }
 
@@ -631,6 +727,44 @@ void gb_mmu_write(gb_mmu_t *mmu, struct gb *gb, u16 addr, u8 val) {
 
         case 0x4A: gb->ppu.wy = val; gb->io[0x4A] = val; return;
         case 0x4B: gb->ppu.wx = val; gb->io[0x4B] = val; return;
+
+        /* Game Boy Color registers; inert on a DMG cartridge. */
+        case 0x4D:
+            if (gb->cgb_mode) gb->speed_switch_armed = (val & 0x01) != 0;
+            return;
+
+        case 0x4F:
+            if (gb->cgb_mode) gb->vram_bank = val & 0x01;
+            return;
+
+        case 0x51: if (gb->cgb_mode) gb->hdma_src = (u16)((gb->hdma_src & 0x00FF) | (val << 8)); return;
+        case 0x52: if (gb->cgb_mode) gb->hdma_src = (u16)((gb->hdma_src & 0xFF00) | (val & 0xF0)); return;
+        case 0x53: if (gb->cgb_mode) gb->hdma_dst = (u16)((gb->hdma_dst & 0x00FF) | ((val & 0x1F) << 8)); return;
+        case 0x54: if (gb->cgb_mode) gb->hdma_dst = (u16)((gb->hdma_dst & 0xFF00) | (val & 0xF0)); return;
+
+        case 0x55:
+            if (gb->cgb_mode) hdma_write_control(gb, val);
+            return;
+
+        case 0x68:
+            if (gb->cgb_mode) gb->ppu.bcps = val;
+            return;
+        case 0x69:
+            if (gb->cgb_mode) gb_ppu_write_cgb_palette(&gb->ppu, false, val);
+            return;
+        case 0x6A:
+            if (gb->cgb_mode) gb->ppu.ocps = val;
+            return;
+        case 0x6B:
+            if (gb->cgb_mode) gb_ppu_write_cgb_palette(&gb->ppu, true, val);
+            return;
+
+        case 0x70:
+            if (gb->cgb_mode) {
+                gb->wram_bank = val & 0x07;
+                if (gb->wram_bank == 0) gb->wram_bank = 1;
+            }
+            return;
 
         default:
             break;

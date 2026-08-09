@@ -6,6 +6,7 @@
 #include "apu.h"
 #include "platform.h"
 #include "menu.h"
+#include "palette.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +56,12 @@ static int run_rom(gb_platform_t *platform, const char *rom_path) {
      * and a struct copy would strand every button and touch update in a
      * duplicate that nothing else reads. */
     gb.platform = platform;
+
+    /* CGB carts program their own colours; the chosen shades only apply to
+     * plain DMG games. */
+    if (!gb.cgb_mode) {
+        gb_ppu_set_dmg_colors(&gb.ppu, gb_palette_colors(gb_palette_load()));
+    }
 
     gb_platform_clear(platform, 0xFF000000);
     gb_platform_draw_touch_overlay(platform);

@@ -337,7 +337,20 @@ static int op_0E(gb_t *gb) { gb->cpu.reg.c = fetch_byte(gb); return 8; } /* LD C
 static int op_0F(gb_t *gb) { gb->cpu.reg.a = rotate_right(gb, gb->cpu.reg.a); return 4; } /* RRCA */
 /* STOP is two bytes but only four cycles: the second byte is skipped without a
  * memory cycle of its own. */
-static int op_10(gb_t *gb) { gb->cpu.reg.pc++; return 4; } /* STOP */
+/* STOP is two bytes but only four cycles: the second byte is skipped without a
+ * memory cycle of its own. On CGB it also carries out a speed switch that KEY1
+ * has armed, which is the only use most games have for it. */
+static int op_10(gb_t *gb) {
+    gb->cpu.reg.pc++;
+    if (gb->cgb_mode && gb->speed_switch_armed) {
+        gb->double_speed = !gb->double_speed;
+        gb->speed_switch_armed = false;
+        /* DIV restarts across a speed change. */
+        gb->io[0x04] = 0;
+        gb->cpu.div_counter = 0;
+    }
+    return 4;
+}
 static int op_11(gb_t *gb) { gb->cpu.reg.de = fetch_word(gb); return 12; } /* LD DE,d16 */
 static int op_12(gb_t *gb) { WRITE(gb, gb->cpu.reg.de, gb->cpu.reg.a); return 8; } /* LD (DE),A */
 static int op_13(gb_t *gb) { gb->cpu.reg.de++; return 8; } /* INC DE */

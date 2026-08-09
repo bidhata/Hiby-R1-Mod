@@ -6,6 +6,9 @@ launcher for picking a game or handing the device back to the music player.
 ## Features
 
 - Full LR35902 CPU emulation (256 main opcodes + 256 CB-prefixed opcodes)
+- **Game Boy Color**: RGB555 palettes, both VRAM banks, banked WRAM, tile
+  attributes, HDMA/GDMA, and double-speed mode
+- Selectable shades for plain DMG games: green, grey, pocket or amber
 - Cycle-interleaved memory access: hardware advances during an instruction, not
   after it, so timer and PPU reads mid-instruction return hardware-accurate values
 - PPU with background, window, and sprite rendering
@@ -28,6 +31,7 @@ the headless runner:
 | `mem_timing` | Passes all 3 tests |
 | `mem_timing-2` | Passes all 3 tests |
 | `halt_bug` | **Fails** — the HALT bug is not emulated |
+| `cgb-acid2` | Pixel-perfect against the reference image |
 
 ## Building
 
@@ -78,8 +82,19 @@ music player remounts it when it starts, so this is harmless to it.
 ## Building a flashable firmware image
 
 The emulator can be baked into a `.upt` so a flashed device boots straight into
-the launcher, with no ADB needed afterwards. From the project root (one level
-above `gb-emu/`):
+the launcher, with no ADB needed afterwards.
+
+The quickest route, which also handles future firmware releases:
+
+```bash
+./gb-emu/patch/build-firmware.sh r1_new.upt r1_gb.upt
+```
+
+That unpacks the stock firmware, installs the launcher and repacks it. See
+`gb-emu/patch/README.md` for what it changes, how to undo it, and what happens
+if HiBy rearranges the boot scripts.
+
+To do it by hand instead, from the project root (one level above `gb-emu/`):
 
 ```bash
 # 1. Cross-compile, and install into the unpacked rootfs
@@ -115,7 +130,11 @@ adb push gb-emu /usr/data/gb-emu && adb shell chmod +x /usr/data/gb-emu
 ## The boot launcher
 
 A device flashed with the image above shows the launcher at every boot. It lists
-**MUSIC PLAYER** first, then every ROM found on the SD card. Volume Up/Down moves
+**MUSIC PLAYER** first, then **PALETTE**, then every ROM found on the SD card.
+Selecting PALETTE cycles the four shades used by plain DMG games (green, grey,
+pocket, amber); the choice is kept in `/usr/data/gb_palette` and survives
+reboots, and Game Boy Color titles ignore it in favour of their own colours.
+Volume Up/Down moves
 the cursor, Play/Pause selects. Picking the music player starts the stock HiBy
 player exactly as the firmware normally would. Picking a ROM runs it; quitting
 the game (Power) returns to the menu, so another game can be started without
@@ -213,6 +232,10 @@ gb-emu/
 ├── scripts/
 │   ├── gb-launcher.sh  # Boot script: launcher, falling back to the player
 │   └── gb-toggle.sh    # Boot-mode switch: emu/player/status/launch
+├── patch/              # Apply to any firmware release
+│   ├── gb-patch.sh     # install / --revert / --check against a rootfs
+│   ├── build-firmware.sh  # stock .upt in, patched .upt out
+│   └── payload/        # prebuilt MIPS binary and scripts
 ├── Makefile
 └── README.md
 ```
@@ -235,9 +258,9 @@ gb-emu/
 
 ## Limitations
 
-- **DMG only.** There is no Game Boy Color support: no CGB palettes, no second
-  VRAM bank, no HDMA. `.gbc` files load and run in DMG mode, and CGB-only ROMs
-  will not work.
+- CGB colour correction is not applied: palettes are scaled straight to 8 bits
+  per channel, which is vivid on a modern panel rather than faithful to the
+  console's dim screen.
 - The HALT bug is not emulated, so `halt_bug.gb` fails. Games rarely depend on it.
 - OAM DMA completes instantly rather than over its 160-cycle transfer window.
 - No save states.

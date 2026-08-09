@@ -24,7 +24,7 @@ endif
 TARGET = gb-emu
 BOOTMENU = bootmenu
 TESTER = gb-headless
-CORE_SRCS = src/gb.c src/cpu.c src/ppu.c src/mmu.c src/apu.c
+CORE_SRCS = src/gb.c src/cpu.c src/ppu.c src/mmu.c src/apu.c src/palette.c
 SRCS = src/main.c $(CORE_SRCS) src/platform.c src/menu.c src/font.c
 OBJS = $(SRCS:.c=.o)
 

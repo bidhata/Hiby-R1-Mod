@@ -81,16 +81,44 @@ void gb_destroy(gb_t *gb) {
 
 int gb_load_rom(gb_t *gb, const char *path) {
     int result = gb_mmu_load_rom(&gb->mmu, path);
-    if (result == 0) {
-        gb->cart_loaded = true;
+    if (result != 0) return result;
+
+    gb->cart_loaded = true;
+
+    /* Header byte 0x143 advertises Game Boy Color support: 0x80 means the cart
+     * uses colour but still runs on a DMG, 0xC0 means colour only. Bit 6 is set
+     * by some carts for other reasons, so only these two values count. */
+    u8 cgb_flag = gb->mmu.rom_data[0x143];
+    gb->cgb_mode = (cgb_flag == 0x80 || cgb_flag == 0xC0);
+
+    if (gb->cgb_mode) {
+        /* The CGB boot ROM leaves A holding 0x11, which is how a cart tells it
+         * is running on colour hardware. */
+        gb->cpu.reg.af = 0x1180;
+        gb->wram_bank = 1;
+        gb->vram_bank = 0;
     }
-    return result;
+
+    return 0;
 }
 
 void gb_tick(gb_t *gb, int cycles) {
     if (cycles <= 0) return;
 
+    /* The timer runs off the CPU clock, so it doubles along with it. */
     gb_mmu_timer_step(gb, cycles);
+
+    /* The video and sound hardware keep their own fixed clock: in double-speed
+     * mode the CPU gets through twice as many cycles per frame, so only half of
+     * them reach the PPU and APU. The odd cycle is carried rather than dropped,
+     * which keeps frame pacing exact over time. */
+    if (gb->double_speed) {
+        gb->tick_carry += cycles;
+        cycles = gb->tick_carry / 2;
+        gb->tick_carry &= 1;
+        if (cycles == 0) return;
+    }
+
     gb_ppu_step(&gb->ppu, gb, cycles);
     gb_apu_step(&gb->apu, gb, cycles);
 }

@@ -55,4 +55,8 @@ void gb_mmu_timer_step(struct gb *gb, int cycles);
 /* Copies the LCD-related I/O registers into the PPU state. */
 void gb_mmu_sync_ppu(struct gb *gb);
 
+/* Moves one block of an HBlank-mode HDMA transfer. Called by the PPU as each
+ * HBlank begins; does nothing unless such a transfer is running. */
+void gb_mmu_hdma_hblank(struct gb *gb);
+
 #endif

@@ -3,6 +3,7 @@
  * same platform layer the emulator uses. */
 #include "menu.h"
 #include "font.h"
+#include "palette.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -38,6 +39,12 @@ static const char *rom_exts[] = { ".gb", ".gbc", NULL };
 #define COL_TEXT      0xFFEAEAEA
 #define COL_DIM       0xFF8888A0
 #define COL_PLAYER    0xFF53C483
+#define COL_PALETTE   0xFFD9A441
+
+/* Fixed rows at the head of the list, before the ROMs. */
+#define MENU_ROW_PLAYER    0
+#define MENU_ROW_PALETTE   1
+#define MENU_ROW_FIRST_ROM 2
 
 #define ROW_H       56
 #define LIST_TOP    150
@@ -146,18 +153,24 @@ static void draw_menu(gb_platform_t *platform, const gb_menu_rom_t *roms,
     gb_font_draw(platform, MARGIN, 80, "GAME BOY", COL_ACCENT, 3);
     gb_platform_fill_rect(platform, MARGIN, 125, width, 3, COL_ACCENT);
 
-    /* Row 0 is always the music player; ROM rows follow. */
+    /* Row 0 is the music player, row 1 the palette, then the ROMs. */
     for (int row = 0; row < visible_rows; row++) {
         int index = scroll + row;
-        if (index > rom_count) break;
+        if (index >= rom_count + MENU_ROW_FIRST_ROM) break;
 
         int y = LIST_TOP + row * ROW_H;
         bool is_selected = (index == selected);
 
-        if (index == 0) {
+        if (index == MENU_ROW_PLAYER) {
             draw_row(platform, y, is_selected, "MUSIC PLAYER", COL_PLAYER, width);
+        } else if (index == MENU_ROW_PALETTE) {
+            /* Selecting this row cycles the shade set used by DMG games. */
+            char label[GB_MENU_NAME_MAX];
+            snprintf(label, sizeof(label), "PALETTE: %s",
+                     gb_palette_name(gb_palette_load()));
+            draw_row(platform, y, is_selected, label, COL_PALETTE, width);
         } else {
-            draw_row(platform, y, is_selected, roms[index - 1].name,
+            draw_row(platform, y, is_selected, roms[index - MENU_ROW_FIRST_ROM].name,
                      COL_TEXT, width);
         }
     }
@@ -172,9 +185,10 @@ static void draw_menu(gb_platform_t *platform, const gb_menu_rom_t *roms,
                  "VOL +/- MOVE   NEXT PICKS", COL_DIM, 2);
 
     /* Scroll position, when the list is longer than the screen. */
-    if (rom_count + 1 > visible_rows) {
+    int total_rows = rom_count + MENU_ROW_FIRST_ROM;
+    if (total_rows > visible_rows) {
         char pos[32];
-        snprintf(pos, sizeof(pos), "%d/%d", selected + 1, rom_count + 1);
+        snprintf(pos, sizeof(pos), "%d/%d", selected + 1, total_rows);
         gb_font_draw(platform, platform->fb_width - MARGIN - gb_font_width(pos, 2),
                      footer_y + 25, pos, COL_DIM, 2);
     }
@@ -187,8 +201,8 @@ gb_menu_result_t gb_menu_run(gb_platform_t *platform, int *start_index) {
 
     int rom_count = gb_menu_scan_roms(roms, GB_MENU_MAX_ROMS);
 
-    /* Entries are the music player plus every ROM. */
-    int total = rom_count + 1;
+    /* Entries are the music player, the palette, then every ROM. */
+    int total = rom_count + MENU_ROW_FIRST_ROM;
     int selected = (start_index && *start_index < total) ? *start_index : 0;
     if (selected < 0) selected = 0;
 
@@ -235,13 +249,23 @@ gb_menu_result_t gb_menu_run(gb_platform_t *platform, int *start_index) {
             break;
 
         case GB_KEY_SELECT:
+            if (selected == MENU_ROW_PALETTE) {
+                /* Cycle to the next shade set and stay in the menu, so the
+                 * effect can be seen on the row itself. */
+                gb_palette_id_t next =
+                    (gb_palette_id_t)((gb_palette_load() + 1) % GB_PALETTE_COUNT);
+                gb_palette_save(next);
+                dirty = true;
+                break;
+            }
+
             if (start_index) *start_index = selected;
-            if (selected == 0) {
+            if (selected == MENU_ROW_PLAYER) {
                 result.action = GB_MENU_PLAYER;
             } else {
                 result.action = GB_MENU_ROM;
                 snprintf(result.rom_path, sizeof(result.rom_path), "%s",
-                         roms[selected - 1].path);
+                         roms[selected - MENU_ROW_FIRST_ROM].path);
             }
             return result;
 

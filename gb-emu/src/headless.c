@@ -16,6 +16,29 @@ static int shade_of(u32 color) {
     for (int i = 0; i < 4; i++) {
         if (dmg_palette[i] == color) return i;
     }
+    /* Colour output (CGB, or a non-default DMG palette) has no fixed shade, so
+     * fall back to brightness. */
+    int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
+    int luma = (r * 30 + g * 59 + b * 11) / 100;
+    return 3 - (luma * 4) / 256;
+}
+
+/* Writes the framebuffer as a PPM, the simplest way to check colour output. */
+static int write_ppm(const gb_t *gb, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+
+    fprintf(f, "P6\n%d %d\n255\n", GB_WIDTH, GB_HEIGHT);
+    for (int i = 0; i < GB_WIDTH * GB_HEIGHT; i++) {
+        u32 c = gb->ppu.framebuffer[i];
+        unsigned char rgb[3] = {
+            (unsigned char)((c >> 16) & 0xFF),
+            (unsigned char)((c >> 8) & 0xFF),
+            (unsigned char)(c & 0xFF)
+        };
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
     return 0;
 }
 
@@ -35,7 +58,7 @@ static void print_screen(const gb_t *gb) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <rom.gb> [frames] [--screen]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <rom.gb> [frames] [--screen] [--ppm out.ppm]\n", argv[0]);
         return 1;
     }
 
@@ -43,8 +66,10 @@ int main(int argc, char *argv[]) {
     if (frames <= 0) frames = 600;
 
     bool show_screen = false;
+    const char *ppm_path = NULL;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--screen") == 0) show_screen = true;
+        else if (strcmp(argv[i], "--ppm") == 0 && i + 1 < argc) ppm_path = argv[++i];
     }
 
     static gb_t gb;
@@ -57,8 +82,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("ROM: %s (MBC %d, ROM %zu KB, RAM %zu KB)\n",
-           argv[1], gb.mmu.mbc, gb.mmu.rom_size / 1024, gb.mmu.ram_size / 1024);
+    printf("ROM: %s (MBC %d, ROM %zu KB, RAM %zu KB, %s)\n",
+           argv[1], gb.mmu.mbc, gb.mmu.rom_size / 1024, gb.mmu.ram_size / 1024,
+           gb.cgb_mode ? "CGB" : "DMG");
 
     for (int i = 0; i < frames; i++) {
         gb_run_frame(&gb);
@@ -80,6 +106,9 @@ int main(int argc, char *argv[]) {
     printf("Non-background pixels: %d / %d\n", drawn, GB_WIDTH * GB_HEIGHT);
 
     if (show_screen) print_screen(&gb);
+    if (ppm_path && write_ppm(&gb, ppm_path) == 0) {
+        printf("Wrote %s\n", ppm_path);
+    }
 
     gb_destroy(&gb);
     return drawn > 0 ? 0 : 2;

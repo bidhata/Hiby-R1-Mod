@@ -1,28 +1,27 @@
 # GB-Emu: Game Boy Emulator for HiBy R1
 
-A Game Boy (DMG) emulator for the HiBy R1 portable music player, with a boot
-launcher for picking a game or handing the device back to the music player.
+Game Boy (DMG) emulator for HiBy R1 portable music player. Boot launcher included — pick game or hand device back to music player.
 
 ## Features
 
 - Full LR35902 CPU emulation (256 main opcodes + 256 CB-prefixed opcodes)
 - **Game Boy Color**: RGB555 palettes, both VRAM banks, banked WRAM, tile
-  attributes, HDMA/GDMA, and double-speed mode
-- Selectable shades for plain DMG games: green, grey, pocket or amber
-- Cycle-interleaved memory access: hardware advances during an instruction, not
-  after it, so timer and PPU reads mid-instruction return hardware-accurate values
-- PPU with background, window, and sprite rendering
+  attributes, HDMA/GDMA, double-speed mode
+- Selectable shades for plain DMG games: green, grey, pocket, amber
+- Cycle-interleaved memory access: hardware advances during instruction, not
+  after — timer and PPU reads mid-instruction return hardware-accurate values
+- PPU with background, window, sprite rendering
 - MBC1, MBC2, MBC3 (with RTC), MBC5 memory bank controllers
-- All four audio channels: two squares, wave, and noise
-- Battery-backed saves, written next to the ROM as `<rom>.sav`
+- All four audio channels: two squares, wave, noise
+- Battery-backed saves, written next to ROM as `<rom>.sav`
 - Framebuffer video output (16 and 32 bpp)
 - ALSA audio output on builds that have it
-- Boot launcher: pick a ROM from the SD card, or start the music player
+- Boot launcher: pick ROM from SD card, or start music player
 
 ### Test ROM status
 
 Verified with [Blargg's test ROMs](https://github.com/retrio/gb-test-roms) via
-the headless runner:
+headless runner:
 
 | ROM | Result |
 |-----|--------|
@@ -30,8 +29,8 @@ the headless runner:
 | `instr_timing` | Passes |
 | `mem_timing` | Passes all 3 tests |
 | `mem_timing-2` | Passes all 3 tests |
-| `halt_bug` | **Fails** — the HALT bug is not emulated |
-| `cgb-acid2` | Pixel-perfect against the reference image |
+| `halt_bug` | **Fails** — HALT bug not emulated |
+| `cgb-acid2` | Pixel-perfect against reference image |
 
 ## Building
 
@@ -46,8 +45,7 @@ make gb-headless  # headless test runner, no framebuffer or audio
 make clean
 make CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
 ```
-Produces a fully static `gb-emu`. The device has no mipsel `libasound`, so this
-build has no audio.
+Produces fully static `gb-emu`. Device has no mipsel `libasound` — build has no audio.
 
 ## Quick Deploy (via ADB)
 
@@ -66,35 +64,29 @@ adb push game.gb /data/mnt/sd_0/games/
 adb shell /usr/bin/gb-toggle.sh launch-emu
 ```
 
-Without ADB, put the ROMs on the SD card directly: make a `games` folder at the
-card's root and copy `.gb` / `.gbc` files into it.
+Without ADB: put ROMs on SD card directly — make `games` folder at card's root, copy `.gb` / `.gbc` files into it.
 
 ### Where the SD card lives
 
-The stock firmware mounts the card at **`/data/mnt/sd_0`** (`/data` is a symlink
-to `/usr/data`), not `/mnt/sd_0`. Nothing mounts it at boot: `sys_server` carries
-out mounts, but only when something asks, and the only thing that ever asks for
-`sd_0` is `hiby_player` — which the launcher runs in place of. `gb-launcher.sh`
-therefore mounts the card itself before starting the emulator, trying
-`mmcblk1p1`, `mmcblk1`, `mmcblk0p1` and `mmcblk0` in turn as vfat/exfat. The
-music player remounts it when it starts, so this is harmless to it.
+Stock firmware mounts card at **`/data/mnt/sd_0`** (`/data` symlink to `/usr/data`), not `/mnt/sd_0`. Nothing mounts it at boot: `sys_server` handles mounts, only when asked — only `hiby_player` ever asks for `sd_0`, and launcher runs in place of it. `gb-launcher.sh`
+therefore mounts card itself before starting emulator, trying
+`mmcblk1p1`, `mmcblk1`, `mmcblk0p1`, `mmcblk0` in turn as vfat/exfat. Music player remounts it on start — harmless to it.
 
 ## Building a flashable firmware image
 
-The emulator can be baked into a `.upt` so a flashed device boots straight into
-the launcher, with no ADB needed afterwards.
+Emulator can be baked into `.upt` so flashed device boots straight into launcher, no ADB needed after.
 
-The quickest route, which also handles future firmware releases:
+Quickest route, handles future firmware releases too:
 
 ```bash
 ./gb-emu/patch/build-firmware.sh r1_new.upt r1_gb.upt
 ```
 
-That unpacks the stock firmware, installs the launcher and repacks it. See
-`gb-emu/patch/README.md` for what it changes, how to undo it, and what happens
-if HiBy rearranges the boot scripts.
+Unpacks stock firmware, installs launcher, repacks it. See
+`gb-emu/patch/README.md` for what changes, how to undo, what happens
+if HiBy rearranges boot scripts.
 
-To do it by hand instead, from the project root (one level above `gb-emu/`):
+By hand instead, from project root (one level above `gb-emu/`):
 
 ```bash
 # 1. Cross-compile, and install into the unpacked rootfs
@@ -115,13 +107,11 @@ cd ..
 ./repack.sh          # writes r1_repacked.upt
 ```
 
-Flash `r1_repacked.upt` the same way as any stock firmware update.
+Flash `r1_repacked.upt` same way as any stock firmware update.
 
-Note that `/usr/data` is a **separate UBIFS partition** mounted at boot, so
-anything placed there inside the image is hidden once that mount happens. The
-binary has to live on the rootfs, at `/usr/bin/gb-emu`. The launcher still
-prefers `/usr/data/gb-emu` when it exists, which is what makes it possible to
-test a new build over ADB without reflashing:
+Note: `/usr/data` is a **separate UBIFS partition** mounted at boot — anything placed there inside image hidden once mount happens. Binary must live on rootfs, at `/usr/bin/gb-emu`. Launcher still
+prefers `/usr/data/gb-emu` when it exists — makes it possible to
+test new build over ADB without reflashing:
 
 ```bash
 adb push gb-emu /usr/data/gb-emu && adb shell chmod +x /usr/data/gb-emu
@@ -129,18 +119,49 @@ adb push gb-emu /usr/data/gb-emu && adb shell chmod +x /usr/data/gb-emu
 
 ## The boot launcher
 
-A device flashed with the image above shows the launcher at every boot. It lists
-**MUSIC PLAYER** first, then **PALETTE**, then every ROM found on the SD card.
-Selecting PALETTE cycles the four shades used by plain DMG games (green, grey,
-pocket, amber); the choice is kept in `/usr/data/gb_palette` and survives
-reboots, and Game Boy Color titles ignore it in favour of their own colours.
-Volume Up/Down moves
-the cursor, Play/Pause selects. Picking the music player starts the stock HiBy
-player exactly as the firmware normally would. Picking a ROM runs it; quitting
-the game (Power) returns to the menu, so another game can be started without
-rebooting.
+Device flashed with image above shows launcher every boot. Row order:
 
-To boot straight to the music player and skip the menu:
+1. **HIBY PLAYER**
+2. **GAMES** (divider — not selectable, cursor skips over it)
+3. **PALETTE**
+4. every ROM found on SD card
+5. **SHUTDOWN**
+6. **FIRMWARE UPDATE (SD)**
+7. **FACTORY RESET**
+8. **STRIP FILE ART**
+9. **STRIP ALBUM ART**
+
+Selecting PALETTE cycles four shades used by plain DMG games (green, grey,
+pocket, amber); choice kept in `/usr/data/gb_palette`, survives
+reboots. Game Boy Color titles ignore it, use own colours.
+Volume Up/Down moves cursor, Next Track selects. Picking HIBY PLAYER starts stock HiBy
+player exactly as firmware normally would. Picking ROM runs it; quitting
+game (Power) returns to menu — another game startable without rebooting.
+
+**Idle timeout:** 5 seconds with no input auto-selects HIBY PLAYER — a
+countdown ("STARTING PLAYER IN Ns...") shows in the footer the whole time
+and resets the instant any key or tap arrives, so a device sitting at the
+menu (or one that just rebooted with nobody in front of it) doesn't stay
+stuck there.
+
+All five entries below PALETTE/the ROM list open a confirm screen first
+(defaults to CANCEL; Power always backs out) — none of them are undoable
+from the menu once picked:
+- **SHUTDOWN** — runs `poweroff`.
+- **FIRMWARE UPDATE (SD)** — runs `bootmode.sh Recovery` and reboots into
+  the updater, same path `Settings → Firmware Update → Via SD-card` uses on
+  stock firmware. Needs a `.upt` file at the SD card's root.
+- **FACTORY RESET** — writes `recovery_all` to `/data/recovery_all` and
+  reboots; `recovery_all.sh` wipes `/data` on the next boot. Same mechanism
+  stock firmware's own factory reset uses.
+- **STRIP FILE ART** — runs `strip_art_all.sh` over the SD card, then
+  returns to the menu (unlike the three above, which never come back).
+  Removes embedded FLAC/MP3 art; see "Stripping Embedded Album Art" in the
+  top-level README.
+- **STRIP ALBUM ART** — runs `remove_folder_art.sh -f`, then returns to the
+  menu. Deletes standalone cover files (`folder.jpg`, `cover.png`, ...).
+
+To boot straight to music player, skip menu:
 
 ```bash
 adb shell /usr/bin/gb-toggle.sh player
@@ -153,27 +174,25 @@ adb reboot
 
 ### How it works
 
-The stock boot chain is `inittab` → `rcS` → `/etc/init.d/S92_03_start_music_player`
-→ `hiby_player.sh`. The firmware image changes that init script's `PL01=` line to
+Stock boot chain: `inittab` → `rcS` → `/etc/init.d/S92_03_start_music_player`
+→ `hiby_player.sh`. Firmware image changes that init script's `PL01=` line to
 point at `gb-launcher.sh` instead.
 
-The rootfs is read-only squashfs, so nothing can rewrite that init script on a
-running device. `gb-toggle.sh` therefore switches modes with a flag file on the
+Rootfs is read-only squashfs — nothing can rewrite that init script on running device. `gb-toggle.sh` switches modes via flag file on
 writable `/usr/data` partition: `/usr/data/gb_boot_mode` containing `player`
-makes the launcher skip the menu and start the music player straight away.
+makes launcher skip menu, start music player straight away.
 
-The emulator never starts the music player itself: it exits with status 10 to
-ask for it, and `gb-launcher.sh` does the starting. Any other exit — a crash, no
-screen, no working buttons — also falls through to the music player, so a broken
-emulator cannot leave the device stuck. `hiby_player.sh` is left untouched in the
-image, so the stock path is always recoverable.
+Emulator never starts music player itself: exits with status 10 to
+request it, `gb-launcher.sh` does the starting. Any other exit — crash, no
+screen, no working buttons — also falls through to music player, so broken
+emulator can't leave device stuck. `hiby_player.sh` untouched in
+image — stock path always recoverable.
 
 ## Controls
 
 ### Launcher
 
-The R1 has only three buttons — a volume rocker, Next Track and Power. There is
-no Play/Pause key on this hardware, so **Next Track confirms**.
+R1 has only three buttons — volume rocker, Next Track, Power. No Play/Pause key on this hardware, so **Next Track confirms**.
 
 | Control | Action |
 |---------|--------|
@@ -185,9 +204,9 @@ no Play/Pause key on this hardware, so **Next Track confirms**.
 
 ### In game
 
-Three buttons cannot cover a Game Boy pad, so the game sits in the upper part of
-the screen and an on-screen pad is drawn below it. The physical keys double up
-on the most-used inputs, and the two sources are combined: holding Vol Up while
+Three buttons can't cover a Game Boy pad — game sits in upper part of
+screen, on-screen pad drawn below. Physical keys double up
+on most-used inputs, two sources combined: holding Vol Up while
 tapping A presses both.
 
 | Control | Game Boy Key |
@@ -202,7 +221,7 @@ tapping A presses both.
 
 ## Running a ROM directly
 
-Passing a path skips the launcher, which is how the headless tests and manual
+Passing a path skips launcher — how headless tests and manual
 runs work:
 
 ```bash
@@ -210,8 +229,8 @@ runs work:
 ./gb-headless rom.gb 600 --screen      # host: run 600 frames, print the screen
 ```
 
-`gb-headless` echoes the serial port to stdout, which is how test ROMs report
-their results.
+`gb-headless` echoes serial port to stdout — how test ROMs report
+results.
 
 ## File Structure
 
@@ -250,7 +269,7 @@ gb-emu/
 
 ## Technical Details
 
-- **Display**: 160x144 native, scaled to fit and centred on the panel
+- **Display**: 160x144 native, scaled to fit, centred on panel
 - **Audio**: 44100Hz, 16-bit mono via ALSA where available
 - **Input**: Linux evdev (`/dev/input/event*`)
 - **Video**: Direct framebuffer mmap (`/dev/fb0`), 16 or 32 bpp
@@ -258,13 +277,18 @@ gb-emu/
 
 ## Limitations
 
-- CGB colour correction is not applied: palettes are scaled straight to 8 bits
-  per channel, which is vivid on a modern panel rather than faithful to the
+- CGB colour correction not applied: palettes scaled straight to 8 bits
+  per channel — vivid on modern panel, not faithful to
   console's dim screen.
-- The HALT bug is not emulated, so `halt_bug.gb` fails. Games rarely depend on it.
+- HALT bug not emulated, so `halt_bug.gb` fails. Games rarely depend on it.
 - OAM DMA completes instantly rather than over its 160-cycle transfer window.
 - No save states.
-- No serial link cable; writes are echoed for test ROMs and read back as 0xFF.
-- Untested on real hardware in this session — no device was attached, so all
-  verification was done on the host with the headless runner and offscreen
+- No serial link cable; writes echoed for test ROMs, read back as 0xFF.
+- Untested on real hardware this session — no device attached, all
+  verification done on host with headless runner and offscreen
   rendering.
+
+## Credits
+
+- **Emulator core** (CPU/PPU/MMU/APU) is based on [jgilchrist/gbemu](https://github.com/jgilchrist/gbemu).
+- Boot launcher, R1 framebuffer/input platform layer, palette selector, boot-mode toggle, firmware patching toolchain, and the SHUTDOWN/FIRMWARE UPDATE/FACTORY RESET/STRIP ART menu additions are specific to this port.

@@ -83,6 +83,15 @@ static int run_rom(gb_platform_t *platform, const char *rom_path) {
     return 0;
 }
 
+/* system() is marked warn_unused_result; these calls are followed by a hang
+ * waiting for the reboot/poweroff to land, so there's nothing to do with a
+ * failure but note it. */
+static void run_cmd(const char *cmd) {
+    if (system(cmd) != 0) {
+        fprintf(stderr, "command failed: %s\n", cmd);
+    }
+}
+
 static void print_usage(const char *argv0) {
     fprintf(stderr, "Usage: %s [rom.gb]\n", argv0);
     fprintf(stderr, "  With no ROM, shows the launcher: pick a game from the\n");
@@ -136,6 +145,33 @@ int main(int argc, char *argv[]) {
         }
         if (choice.action == GB_MENU_QUIT) {
             break;
+        }
+        if (choice.action == GB_MENU_SHUTDOWN) {
+            gb_platform_destroy(&platform);
+            printf("Shutting down...\n");
+            sync();
+            run_cmd("poweroff");
+            /* poweroff is asynchronous; wait here so the launcher doesn't
+             * fall through to anything else while it happens. */
+            for (;;) pause();
+        }
+        if (choice.action == GB_MENU_FIRMWARE_UPDATE) {
+            gb_platform_destroy(&platform);
+            printf("Rebooting into the firmware updater...\n");
+            sync();
+            run_cmd("/usr/bin/bootmode.sh Recovery");
+            run_cmd("echo clear > /proc/jz/reset/reset");
+            run_cmd("reboot");
+            for (;;) pause();
+        }
+        if (choice.action == GB_MENU_FACTORY_RESET) {
+            gb_platform_destroy(&platform);
+            printf("Factory reset requested, rebooting...\n");
+            run_cmd("echo recovery_all > /data/recovery_all");
+            sync();
+            run_cmd("echo clear > /proc/jz/reset/reset");
+            run_cmd("reboot");
+            for (;;) pause();
         }
 
         run_rom(&platform, choice.rom_path);

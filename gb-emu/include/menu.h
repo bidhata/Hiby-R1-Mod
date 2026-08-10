@@ -9,10 +9,17 @@
 #define GB_MENU_NAME_MAX 128
 
 typedef enum {
-    GB_MENU_QUIT = 0,   /* shut the launcher down without starting anything */
-    GB_MENU_PLAYER,     /* hand the device back to the HiBy music player */
-    GB_MENU_ROM         /* run rom_path */
+    GB_MENU_QUIT = 0,        /* shut the launcher down without starting anything */
+    GB_MENU_PLAYER,          /* hand the device back to the HiBy music player */
+    GB_MENU_ROM,             /* run rom_path */
+    GB_MENU_SHUTDOWN,        /* power the device off */
+    GB_MENU_FIRMWARE_UPDATE, /* reboot into the SD-card firmware updater */
+    GB_MENU_FACTORY_RESET    /* wipe /data and reboot */
 } gb_menu_action_t;
+
+/* Everything else is handled inline by the menu itself (strip_art_all.sh /
+ * remove_folder_art.sh run and return to the menu, they don't hand control
+ * back to main.c the way the actions above do). */
 
 typedef struct {
     gb_menu_action_t action;

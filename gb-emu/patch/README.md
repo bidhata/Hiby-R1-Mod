@@ -1,7 +1,6 @@
 # Applying the Game Boy launcher to a HiBy R1 firmware
 
-Two scripts, so a new firmware release can be re-patched without repeating any
-of the analysis behind it.
+Two scripts. New firmware release re-patch possible, no repeat of analysis behind it.
 
 ## One command
 
@@ -9,14 +8,11 @@ of the analysis behind it.
 ./build-firmware.sh r1_new.upt r1_gb.upt
 ```
 
-Unpacks the stock firmware, installs the launcher, repacks it. Flash
-`r1_gb.upt` the way you would any HiBy update. Needs `7z`, `unsquashfs`,
-`mksquashfs` and `genisoimage`; nothing is written outside the output file.
+Unpacks stock firmware, installs launcher, repacks it. Flash `r1_gb.upt` like any HiBy update. Needs `7z`, `unsquashfs`, `mksquashfs`, `genisoimage`; nothing written outside output file.
 
 ## Step by step
 
-If you would rather see the intermediate tree, or make other changes at the same
-time:
+Want intermediate tree, or other changes same time:
 
 ```bash
 ./unpack.sh r1_new.upt                    # from the project root
@@ -33,8 +29,7 @@ time:
 | Adds the boot-mode switch | `/usr/bin/gb-toggle.sh` |
 | Points the boot script at the launcher | `/etc/init.d/S9*_start_music_player` |
 
-Four files, nothing else. `hiby_player.sh` is untouched, so the stock path stays
-intact and the launcher hands back to it whenever the user picks MUSIC PLAYER.
+Four files, nothing else. `hiby_player.sh` untouched — stock path stays intact, launcher hands back to it whenever user picks MUSIC PLAYER.
 
 ## Other commands
 
@@ -43,39 +38,27 @@ intact and the launcher hands back to it whenever the user picks MUSIC PLAYER.
 ./gb-patch.sh --revert squashfs-root   # restore the stock boot exactly
 ```
 
-`--revert` restores the init script from the backup the patch made
-(`<init>.gb-orig`), then removes the three added files. Re-running the install is
-safe: the backup is only taken the first time, so it always holds the stock
-version.
+`--revert` restores init script from backup patch made (`<init>.gb-orig`), removes three added files. Re-running install safe: backup only taken first time, always holds stock version.
 
 ## Surviving a firmware update
 
-The init script is found by **what it does**, not by its name: the patch scans
-`/etc/init.d/S*` for the one that launches `hiby_player.sh`, and reads the
-variable name out of it rather than assuming `PL01`. A firmware that renumbers
-the script or renames the variable is handled without changes here.
+Init script found by **what it does**, not name: patch scans `/etc/init.d/S*` for one launching `hiby_player.sh`, reads variable name out of it rather than assuming `PL01`. Firmware renumbering script or renaming variable — handled, no changes needed here.
 
-If HiBy ever stops starting the player from an init script, the patch stops and
-says so rather than guessing:
+If HiBy ever stops starting player from init script, patch stops, says so instead of guessing:
 
 ```
 error: no init script starts hiby_player.sh; firmware layout has changed, not patching
 ```
 
-That is the point at which this directory needs revisiting — the boot chain
-would have to be traced again, as `/etc/inittab` → `rcS` → `S92_03_*` →
-`hiby_player.sh`.
+That's when this directory needs revisiting — boot chain retraced: `/etc/inittab` → `rcS` → `S92_03_*` → `hiby_player.sh`.
 
 ## The binary
 
-`payload/gb-emu` is a prebuilt static MIPS32r2 executable, so the patch works
-with no toolchain installed. To use your own build instead, compile it and the
-patch will prefer it automatically:
+`payload/gb-emu` prebuilt static MIPS32r2 executable — patch works, no toolchain needed. Own build instead: compile it, patch prefers it automatically:
 
 ```bash
 make -C .. clean
 make -C .. CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
 ```
 
-The patch checks that whatever it picks is actually a MIPS binary, so a native
-x86 build left in the project directory cannot end up in the image by mistake.
+Patch checks whatever it picks is actually MIPS binary — native x86 build left in project directory can't end up in image by mistake.

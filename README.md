@@ -15,7 +15,7 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 > **Every dollar keeps this project alive and motivates future updates!**
 
 ---
-![Boot Menu](images/boot_menu.jpg)
+![Boot Menu](images/boot_screen.jpg)
 # 🎶+🎮 HiBy R1 — Game Boy Edition (v1.8 b2)
 
 Custom firmware for the **HiBy R1** portable music player that adds a full **Game Boy / Game Boy Color emulator** to the boot menu, \tunes storage/DAC settings HiBy ships conservative or disabled.

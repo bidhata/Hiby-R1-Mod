@@ -237,30 +237,6 @@ The R1 only has three physical controls — volume rocker, Next Track, Power —
 
 Physical and on-screen inputs combine — e.g. hold Vol Up while tapping the on-screen A to press both Up and A at once. Quitting a game (Power) returns to the menu; you can start another ROM without rebooting.
 
-### Boot straight to the music player (skip the menu)
-
-If you'd rather the device boot normally and only open the game menu on demand:
-
-```bash
-adb shell /usr/bin/gb-toggle.sh player   # boots straight to MUSIC PLAYER
-adb reboot
-```
-
-```bash
-adb shell /usr/bin/gb-toggle.sh emu      # brings the GAME BOY menu back
-adb reboot
-```
-
-```bash
-adb shell /usr/bin/gb-toggle.sh status   # shows current boot mode, ROMs found, emulator path
-```
-
-This works because the rootfs is read-only squashfs — the toggle never rewrites the init script. It just drops a flag file on the writable `/usr/data` partition (`/usr/data/gb_boot_mode`) that `gb-launcher.sh` checks at every boot.
-
-You can also jump straight into the launcher without changing the boot mode or rebooting:
-```bash
-adb shell /usr/bin/gb-toggle.sh launch-emu
-```
 
 ---
 

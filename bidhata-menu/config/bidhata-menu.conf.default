@@ -1,0 +1,9 @@
+# Bidhata Menu default configuration.
+# LABEL|COLOR|ACTION|PARAM|CONFIRM_TEXT
+HIBY PLAYER|PLAYER|run|player|
+ROCKBOX (BETA)|ROCKBOX|run|/usr/bin/rockbox.r1|
+SHUTDOWN|SHUTDOWN|shutdown||Power off the device.
+FIRMWARE UPDATE (SD)|FW_UPDATE|fw_update||Reboots into the updater. Needs a .upt file
+FACTORY RESET|DANGER|factory_reset||Erases ALL data on the device. Cannot be undone.
+STRIP FILE ART|STRIP|exec|strip_art_all.sh|Removes embedded art from every FLAC/MP3 on SD.
+STRIP ALBUM ART|STRIP|exec|remove_folder_art.sh -f|Deletes folder.jpg/cover.png etc. from SD. Cannot be undone.

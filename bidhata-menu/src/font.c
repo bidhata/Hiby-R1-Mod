@@ -1,4 +1,7 @@
-/* 5x7 bitmap font and text drawing for the on-device menus. */
+/* 5x7 bitmap font -- each letter is 5 columns of 7 pixels, lovingly
+ * handcrafted. No TTF, no FreeType, no drama. The R1's screen is 480x800:
+ * at 2x scale every char is 12x14 pixels, readable but still fits ~40 per
+ * row. At 1x it's a stylish micro-font for "oh we need smaller text." */
 #include "font.h"
 
 #include <string.h>
@@ -117,8 +120,7 @@ void bidhata_font_draw(bidhata_platform_t *platform, int x, int y, const char *t
         if (c < 0x20 || c > 0x7E) c = ' ';
         const u8 *glyph = font5x7[c - 0x20];
 
-        /* Glyph columns run left to right; each byte holds that column's
-         * seven rows in its top bits. */
+                /* Each byte is one column, MSB is top row. Like Minecraft but 5x7. */
         for (int col = 0; col < BIDHATA_FONT_W; col++) {
             for (int row = 0; row < BIDHATA_FONT_H; row++) {
                 if (!(glyph[col] & (0x80 >> row))) continue;

@@ -1,30 +1,28 @@
 #ifndef BIDHATA_MENU_H
 #define BIDHATA_MENU_H
-
+/* menu.h -- the actual boot menu. Where pixels become choices and choices become shell commands. */
 #include "types.h"
 #include "platform.h"
 #include "menu_config.h"
 
 typedef enum {
-    BIDHATA_MENU_QUIT = 0,      /* shut the launcher down without starting anything */
-    BIDHATA_MENU_ITEM_SELECTED, /* result.item_index names which config row */
+    BIDHATA_MENU_QUIT = 0,      /* "i'm out, no pick" -- caller decides what's next */
+    BIDHATA_MENU_ITEM_SELECTED, /* you picked a thing -- see item_index */
+    BIDHATA_MENU_BACK,          /* back from submenu -- no drama */
 } bidhata_menu_action_t;
 
-/* EXEC-action items (strip_art_all.sh / remove_folder_art.sh and anything
- * else config-defined) are run inline by the menu itself and never
- * produce this result -- the user stays in the menu until they pick
- * something that leaves it. */
+/* EXEC items run inline and loop back; SUBMENU recurses and returns BACK.
+ * Everything else (real pick, quit, timeout->player) bubbles straight up
+ * like a well-behaved exception -- no swallowing, no drama. */
 
 typedef struct {
     bidhata_menu_action_t action;
     int item_index; /* valid when action == BIDHATA_MENU_ITEM_SELECTED */
 } bidhata_menu_result_t;
 
-/* Draws the launcher and blocks until the user picks something that leaves
- * it. start_index is the row to place the cursor on, and is updated to
- * wherever the cursor ended so a return trip lands on the same entry. cfg
- * is loaded once by the caller (main.c), not reloaded every frame. */
+/* Draw one screen (main if group=="", else that submenu), block until pick/quit/timeout.
+ * start_index = where cursor lands + where it ends (NULL = fresh top). cfg loaded once. */
 bidhata_menu_result_t bidhata_menu_run(bidhata_platform_t *platform, int *start_index,
-                                       const bidhata_menu_config_t *cfg);
+                                       const bidhata_menu_config_t *cfg, const char *group);
 
 #endif

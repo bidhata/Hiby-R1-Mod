@@ -1,10 +1,9 @@
 #!/bin/bash
-# Turns a stock HiBy R1 firmware into one that boots the boot menu launcher.
+# build-firmware.sh -- stock .upt in, patched .upt out. Firmware smoothies.
 #
 #   ./build-firmware.sh r1_new.upt [output.upt]
 #
-# Unpacks the firmware, applies the patch and repacks it, leaving the working
-# tree alone. Requires 7z, unsquashfs, mksquashfs and genisoimage.
+# Unpacks, patches, repacks, leaves your tree pristine. Needs 7z, unsquashfs, mksquashfs, genisoimage.
 
 set -euo pipefail
 
@@ -41,8 +40,7 @@ unsquashfs -q -d "$WORK/squashfs-root" "$WORK/rootfs.squashfs" >/dev/null
 echo "==> Patching"
 "$SELF_DIR/bidhata-patch.sh" "$WORK/squashfs-root"
 
-# The backup exists so --revert can restore a working tree; shipping it inside
-# the flashed image would only leave a stray file on the device.
+# Backup is for --revert on your dev tree; don't ship it -- stray files are party crashers.
 find "$WORK/squashfs-root/etc/init.d" -name '*.bidhata-orig' -delete
 
 echo "==> Repacking"

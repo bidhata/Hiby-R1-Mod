@@ -40,6 +40,10 @@ bootmenu: src/bootmenu.c
 
 clean:
 	rm -f $(OBJS) $(TARGET) $(BOOTMENU)
+	$(MAKE) -C tools/compress-art clean 2>/dev/null || true
+
+compress_art:
+	$(MAKE) -C tools/compress-art $(if $(CROSS),CROSS=$(CROSS)) $(if $(STATIC),STATIC=$(STATIC))
 
 # Push a new build to a device that already runs the launcher firmware. The
 # rootfs is read-only squashfs, so this only writes to /usr/data, which the
@@ -63,4 +67,4 @@ deploy: $(TARGET)
 	@echo "Scripts and the fallback binary ship in the firmware image;"
 	@echo "rebuild and flash it with ../repack.sh to update those."
 
-.PHONY: all clean deploy bootmenu
+.PHONY: all clean deploy bootmenu compress_art

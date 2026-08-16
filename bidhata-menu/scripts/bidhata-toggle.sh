@@ -1,10 +1,10 @@
 #!/bin/sh
-# Boot menu control for the HiBy R1.
-# Run over ADB: bidhata-toggle.sh [menu|player|status|launch-menu]
+# bidhata-toggle.sh -- the menu's light switch. Run over ADB:
+#   bidhata-toggle.sh [menu|player|status|launch-menu]
 #
-# The rootfs is read-only squashfs, so this does not edit any init script. The
-# firmware image already boots /usr/bin/bidhata-launcher.sh; this only writes a flag
-# on the writable /usr/data partition that tells the launcher what to do.
+# Rootfs is read-only squashfs (immutable, like your professor's syllabus), so
+# we don't edit init scripts. We just drop/touch a flag on writable /usr/data
+# and the launcher obeys. Think feature flag, but make it boot mode. 
 
 MODE_FLAG=/usr/data/bidhata_boot_mode
 LAUNCHER=/usr/bin/bidhata-launcher.sh
@@ -44,7 +44,7 @@ case "$1" in
         ;;
 
     launch-menu)
-        # Open the launcher now, without changing the boot mode.
+        # Pop the menu RIGHT NOW, don't touch boot mode. Like sneak preview night.
         killall hiby_player 2>/dev/null
         sleep 1
         if [ -x "$MENU" ]; then

@@ -1,13 +1,12 @@
 #ifndef BIDHATA_PLATFORM_H
 #define BIDHATA_PLATFORM_H
-
+/* platform.h -- where raw Linux meets our menu. Framebuffer goes brr, inputs go click. */
 #include "types.h"
 
-/* Upper bound on the /dev/input/eventN nodes scanned at startup. */
+/* How many /dev/input/eventN nodes we bother opening. 8 is overkill, but R1 is extra. */
 #define BIDHATA_MAX_INPUT_DEVICES 8
 
-/* One key press at a time, for menu navigation -- each press reported once so
- * a single tap moves the cursor a single row. */
+/* One press = one move. No cheating, no turbo-fire. */
 typedef enum {
     BIDHATA_KEY_NONE = 0,
     BIDHATA_KEY_UP,
@@ -25,24 +24,16 @@ typedef struct {
     int fb_bpp;
     int fb_stride;
 
-    /* Every /dev/input/eventN is opened: the R1 spreads its controls over
-     * several nodes (GPIO keys, touchscreen, ADC keys, earpod remote) and their
-     * numbering follows driver load order, so which one carries the volume keys
-     * is not fixed. */
+    /* Every /dev/input/eventN -- R1 scatters keys across GPIO/touch/ADC/earpods like confetti. */
     int input_fds[BIDHATA_MAX_INPUT_DEVICES];
     int input_count;
 
-    /* Touchscreen state, for tap-to-select in the menu. The R1's own
-     * physical buttons are just volume up/down, next track, and power, so
-     * touch is the only way to reach most menu rows directly. */
+    /* Touch goo: tap-to-select needs finger tracking. */
     bool touch_active;
     int touch_x;
     int touch_y;
 
-    /* Menu key presses seen while draining the input devices but not yet
-     * returned. A poll has to consume everything queued on each descriptor, so
-     * without somewhere to park the extras, a second press arriving in the same
-     * interval would be thrown away. */
+    /* Tiny key queue: polls drain all fds, we park extras here so second taps don't vanish like lost socks. */
     bidhata_key_t key_queue[16];
     int key_queue_head;
     int key_queue_tail;
@@ -51,18 +42,14 @@ typedef struct {
 int bidhata_platform_init(bidhata_platform_t *platform);
 void bidhata_platform_destroy(bidhata_platform_t *platform);
 
-/* Direct framebuffer drawing, used by the menu. Both handle 16 and 32 bpp and
- * clip to the panel. */
+/* Draw on the framebuffer. Handles 16bpp and 32bpp, clips to panel bounds so we don't paint off-screen like a toddler. */
 void bidhata_platform_fill_rect(bidhata_platform_t *platform, int x, int y, int w, int h,
                            u32 color);
 void bidhata_platform_clear(bidhata_platform_t *platform, u32 color);
 
 bidhata_key_t bidhata_platform_poll_key(bidhata_platform_t *platform);
 
-/* Drains buttons and the touch panel in one pass, so the menu can be driven by
- * either. Returns the first key pressed, and sets *tapped once per completed
- * finger-down/finger-up with the release point in *tap_x and *tap_y. Any of the
- * out-parameters may be NULL. */
+/* One poll to handle them all: buttons + touch. Reports first key + tap location. NULL-safe. */
 bidhata_key_t bidhata_platform_poll_menu(bidhata_platform_t *platform, bool *tapped,
                                int *tap_x, int *tap_y);
 

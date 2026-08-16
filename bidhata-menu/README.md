@@ -1,283 +1,327 @@
-# bidhata-menu: Boot Menu Launcher for HiBy R1
+# 🧙 Bidhata Menu — Boot Menu Launcher for HiBy R1
 
-Boot utility launcher for the HiBy R1 portable music player. Shows a menu of
-system actions, hands the device back to the stock music player (or to
-Rockbox) once the user picks one.
+> Your HiBy R1's new front door. A tiny, nerdy, framebuffer-drawn menu that greets you at every boot, lets you pick what to do, and then gets out of the way. Think GRUB, but for a pocket music player, and with more `killall hiby_player`.
 
-Originally a Game Boy emulator; the emulation core (CPU/PPU/MMU/APU, ROM
-scanning, palette selection) has since been removed — this is now just the
-boot menu, fully renamed to Bidhata Menu (binary, scripts, on-screen title,
-all of it). Menu rows are config-driven (see "Configuring the menu" below)
-rather than hardcoded in C, specifically so this is easy to adopt on a
-different modded firmware: add/remove/reorder rows, or point a row at a
-different alternate player, by editing a plain-text file — no rebuild.
+Built for the **HiBy R1** (Ingenic X1600, MIPS32r2, 480×800, Linux). Originally a Game Boy emulator's launcher; the emu moved out and the menu stayed -- now it's a self-contained, config-driven boot utility that fits in one folder.
 
-## Building
+**Upload just `bidhata-menu/` to your report. That's it. Everything downstream (binary, scripts, compress, payload) comes from here.**
 
-### Native build (x86_64, for testing)
-```bash
-make
+---
+
+## ✨ What It Does
+
+- **Shows a menu every boot** -- pick MUSIC PLAYER, utilities, or your own custom entries
+- **Hands back to stock `hiby_player` untouched** -- no forks, no patches to the player itself
+- **Auto-boots to player after 5s idle** -- leave it alone, it orders for you
+- **Config-driven** -- add menu rows / submenus without touching C
+- **Optional cover-art compressor** -- shrink bloated FLAC/MP3 art to 480px, save SD + RAM
+- **Reverts cleanly** -- one command restores stock boot, forever
+
+---
+
+## 🗂️ What's Inside `bidhata-menu`
+
+```
+bidhata-menu/
+├── config/
+│   └── bidhata-menu.conf.default    # Shipped menu layout (edit to customize)
+├── include/
+│   ├── menu.h / menu_config.h / platform.h / font.h / types.h
+│   └── ...                          # Headers (nerdy-commented, delightful)
+├── src/
+│   ├── main.c                       # Entry + signal + exit-code dance (42!)
+│   ├── menu.c                       # Drawer + poller + confirm gate + idle timer
+│   ├── platform.c                   # /dev/fb0 mmap + /dev/input evdev
+│   ├── menu_config.c                # Pipe-delimited parser (CSV's chaotic cousin)
+│   ├── font.c                       # 5×7 bitmap, 480×800 love
+│   └── bootmenu.c                   # Legacy stub (unused, here for archaeology)
+├── scripts/
+│   ├── bidhata-launcher.sh          # The bouncer -- shows menu, starts player
+│   └── bidhata-toggle.sh            # Light switch: menu / player / status
+├── tools/
+│   └── compress-art/                # Self-contained shrinker (stb_image family)
+│       ├── compress_art.c           # The JPEG diet plan
+│       ├── compress_art_all.sh      # Batch: embedded FLAC/MP3 art
+│       ├── compress_folder_art.sh   # Batch: folder.jpg / cover.png ...
+│       ├── stb_image*.h             # Public-domain, no deps
+│       └── Makefile                 # Cross or native
+├── patch/
+│   ├── bidhata-patch.sh             # Firmware surgeon (install / check / revert)
+│   ├── build-firmware.sh            # One-liner: stock .upt -> patched .upt
+│   ├── payload/                     # Prebuilt MIPS files (no toolchain needed)
+│   └── README.md
+├── Makefile                         # Top-level: build menu (+ optionally compress_art)
+└── README.md                        # You are here. Hi. 👋
 ```
 
-### Cross-compile for HiBy R1 (MIPS32-le, static musl)
+Everything you need is under this tree. Build `bidhata-menu` and `compress_art` from here, patch from here, flash from here.
+
+---
+
+## 🔧 Building
+
+### Native (x86_64, for testing on your laptop -- USB keyboard works as input)
+
 ```bash
-make clean
-make CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
-```
-Produces fully static `bidhata-menu`.
-
-## Quick Deploy (via ADB)
-
-```bash
-# 1. Cross-compile
-make clean
-make CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
-
-# 2. Push binary and scripts to the device
-make deploy
-
-# 3. Open the launcher now, without changing the boot setup
-adb shell /usr/bin/bidhata-toggle.sh launch-menu
+cd bidhata-menu
+make                  # builds ./bidhata-menu
+make compress_art     # builds ./tools/compress-art/compress_art
 ```
 
-### Where the SD card lives
-
-Stock firmware mounts card at **`/data/mnt/sd_0`** (`/data` symlink to
-`/usr/data`), not `/mnt/sd_0`. Nothing mounts it at boot: `sys_server`
-handles mounts, only when asked — only `hiby_player` ever asks for `sd_0`,
-and launcher runs in place of it. `bidhata-launcher.sh` therefore mounts the
-card itself before starting the menu, trying `mmcblk0p1`, `mmcblk0`,
-`mmcblk1p1`, `mmcblk1` in turn as vfat/exfat. This is what makes Rockbox's
-`.rockbox/` resource tree on the card visible. Music player remounts it on
-start — harmless to it.
-
-## Building a flashable firmware image
-
-Launcher can be baked into `.upt` so a flashed device boots straight into
-it, no ADB needed after.
-
-Quickest route, handles future firmware releases too:
+### Cross for HiBy R1 (MIPS32-le, static musl -- drop-in for device)
 
 ```bash
-./bidhata-menu/patch/build-firmware.sh r1_new.upt r1_gb.upt
-```
-
-Unpacks stock firmware, installs launcher, repacks it. See
-`bidhata-menu/patch/README.md` for what changes, how to undo, what happens
-if HiBy rearranges boot scripts.
-
-By hand instead, from project root (one level above `bidhata-menu/`):
-
-```bash
-# 1. Cross-compile, and install into the unpacked rootfs
 cd bidhata-menu
 make clean
 make CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
-cp bidhata-menu           ../squashfs-root/usr/bin/bidhata-menu
-cp scripts/bidhata-launcher.sh ../squashfs-root/usr/bin/
-cp scripts/bidhata-toggle.sh   ../squashfs-root/usr/bin/
-cp config/bidhata-menu.conf.default ../squashfs-root/usr/bin/bidhata-menu.conf
-chmod 755 ../squashfs-root/usr/bin/bidhata-menu ../squashfs-root/usr/bin/bidhata-*.sh
-
-# 2. Point the boot script at the launcher
-sed -i 's|^PL01=.*|PL01=/usr/bin/bidhata-launcher.sh|' \
-    ../squashfs-root/etc/init.d/S92_03_start_music_player
-
-# 3. Repack
-cd ..
-./repack.sh          # writes r1_repacked.upt
+make compress_art CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
 ```
 
-Flash `r1_repacked.upt` same way as any stock firmware update.
+Produces:
+- `bidhata-menu` -- static MIPS32r2 ELF (no deps, no musl on device needed)
+- `tools/compress-art/compress_art` -- static MIPS32r2 ELF
 
-Note: `/usr/data` is a **separate UBIFS partition** mounted at boot —
-anything placed there inside the image is hidden once the mount happens.
-The binary must live on rootfs, at `/usr/bin/bidhata-menu`. Launcher still
-prefers `/usr/data/bidhata-menu` when it exists — makes it possible to
-test a new build over ADB without reflashing:
+The payload under `patch/payload/` already carries prebuilts. If you rebuild, the patch prefers your fresh binary automatically -- just re-run it.
 
-```bash
-adb push bidhata-menu /usr/data/bidhata-menu && adb shell chmod +x /usr/data/bidhata-menu
-```
+---
 
-## The boot menu
+## 📋 Configuring the Menu -- Very Easy
 
-Device flashed with the image above shows the menu every boot. Row order,
-labels, colors, and actions all come from `bidhata-menu.conf` (see
-"Configuring the menu" below) -- the default config ships these 7 rows:
-
-1. **HIBY PLAYER** -- the reserved sentinel row; always available even if
-   the config is missing or broken.
-2. **ROCKBOX (BETA)** -- starts `rockbox.r1`.
-3. **SHUTDOWN** -- runs `poweroff`.
-4. **FIRMWARE UPDATE (SD)** -- runs `bootmode.sh Recovery` and reboots into
-   the updater, same path `Settings → Firmware Update → Via SD-card` uses
-   on stock firmware. Needs a `.upt` file at the SD card's root.
-5. **FACTORY RESET** -- writes `recovery_all` to `/data/recovery_all` and
-   reboots; `recovery_all.sh` wipes `/data` on the next boot. Same
-   mechanism stock firmware's own factory reset uses.
-6. **STRIP FILE ART** -- runs `strip_art_all.sh` over the SD card, then
-   returns to the menu (unlike the entries above, which never come back).
-   Removes embedded FLAC/MP3 art; see "Stripping Embedded Album Art" in the
-   top-level README.
-7. **STRIP ALBUM ART** -- runs `remove_folder_art.sh -f`, then returns to
-   the menu. Deletes standalone cover files (`folder.jpg`, `cover.png`,
-   ...).
-
-Volume Up/Down moves cursor, Next Track selects. Every row with a
-non-empty `CONFIRM_TEXT` in the config opens a confirm screen first
-(defaults to CANCEL; Power always backs out) before running -- that's
-every default row except HIBY PLAYER and ROCKBOX (BETA).
-
-**Idle timeout:** 5 seconds with no input auto-selects whichever row is the
-reserved "player" sentinel (HIBY PLAYER by default) -- a countdown
-("STARTING \<LABEL\> IN Ns...") shows in the footer the whole time and
-resets the instant any key or tap arrives, so a device sitting at the menu
-(or one that just rebooted with nobody in front of it) doesn't stay stuck
-there. If a customized config has no player-sentinel row at all, idle
-timeout quits the menu instead of guessing.
-
-## Configuring the menu
-
-`bidhata-menu.conf` is a plain-text, pipe-delimited file: one line per
-menu row, `#`-prefixed and blank lines ignored.
+The whole menu is a text file: one line per row, `|` separated. No JSON, no XML. Editors love it, MIPS loves it.
 
 ```
-LABEL|COLOR|ACTION|PARAM|CONFIRM_TEXT
+LABEL|COLOR|ACTION|PARAM|CONFIRM_TEXT|GROUP
 ```
 
-- **LABEL** -- row text, e.g. `ROCKBOX (BETA)`.
-- **COLOR** -- a name from the built-in palette (`PLAYER`, `ROCKBOX`,
-  `SHUTDOWN`, `FW_UPDATE`, `DANGER`, `STRIP`, `TEXT`), or a raw `0xRRGGBB`
-  for anything the palette doesn't cover.
-- **ACTION** -- one of:
-  - `run` with `PARAM=player` -- the reserved sentinel: exits with status
-    10 to hand back to the stock music player. Always safe even with a
-    broken config elsewhere in the file.
-  - `run` with `PARAM=<path> [args...]` -- launches a different binary.
-    Exits with a generic status; `bidhata-launcher.sh` execs whatever was
-    selected. Adding a row that launches an entirely different alternate
-    player is a **one-line change here, no code, no rebuild**.
-  - `exec` with `PARAM=<shell command>` -- runs in-process via `system()`,
-    then returns to the menu (what STRIP FILE ART/ALBUM ART do).
-  - `shutdown` / `factory_reset` / `fw_update` -- reserved built-in
-    keywords (PARAM ignored) for the three actions that need exact
-    `sync()`-before-reboot sequencing; not available as raw config-supplied
-    commands, on purpose.
-- **CONFIRM_TEXT** -- non-empty shows the Yes/No gate with this detail
-  text before running; empty skips it.
+- **LABEL** -- text shown, e.g. `HIBY PLAYER`, `MY GAME`
+- **COLOR** -- palette name `PLAYER|SHUTDOWN|FW_UPDATE|DANGER|STRIP|TEXT` or raw `0xRRGGBB`
+- **ACTION** -- what happens when you pick it:
+  - `run` with `PARAM=player` -- sentinel: exit 10, launcher starts `hiby_player`
+  - `run` with `PARAM=/path/to/bin [args]` -- launch that binary (Rockbox, retro emu, your shell -- go wild)
+  - `exec` with `PARAM=shell command` -- run in-process, return to menu (what compress + `adbon` do)
+  - `submenu` with `PARAM=GROUP_NAME` -- open that submenu screen
+  - `shutdown` / `fw_update` / `factory_reset` -- built-ins (handle reboot sequencing safely)
+- **CONFIRM_TEXT** -- non-empty => "Are you sure?" gate. Empty => no gate.
+- **GROUP** -- empty => main screen. Non-empty => only inside the submenu named `GROUP`. Flat file, flat logic. No trees, no drama.
 
-Worked example -- adding a row for a different alternate player:
+### Default layout (shipped)
+
+**Main:**
+
+1. **HIBY PLAYER** -- sentinel, always there even if config is broken
+2. **UTILITIES** -- submenu
+3. **DANGER ZONE** -- submenu
+
+**UTILITIES:**
+
+- `SHUTDOWN`, `FIRMWARE UPDATE (SD)`, `COMPRESS FILE ART`, `COMPRESS ALBUM ART`, `ENABLE ADB`
+
+**DANGER ZONE:**
+
+- `FACTORY RESET` (its own scary submenu, as it should be)
+
+### Add a menu item (no rebuild needed)
+
+Top-level:
 
 ```
 MY PLAYER|PLAYER|run|/usr/bin/my-player|
 ```
 
-Delete a row by deleting its line. Reorder by reordering lines.
+Inside UTILITIES:
 
-**Where it lives:** `/usr/data/bidhata-menu.conf` if present (writable,
-push over ADB to customize without reflashing), else the bundled default
-at `/usr/bin/bidhata-menu.conf` (baked into the image, installed by
-`bidhata-patch.sh`), else a compiled-in fallback identical to
-`config/bidhata-menu.conf.default` -- a missing or malformed config file
-can never leave the menu empty.
+```
+MY TOOL|STRIP|exec|my_cmd||UTILITIES
+```
 
-To boot straight to music player, skip menu:
+### Add a submenu
+
+```
+MY TOOLS|STRIP|submenu|MYTOOLS|
+MY TOOL ONE|STRIP|exec|echo hello||MYTOOLS|
+MY TOOL TWO|STRIP|exec|do_thing --fast||MYTOOLS|
+```
+
+That's it. Delete a line => gone. Reorder lines => reorder menu.
+
+### Where configs live (priority order)
+
+1. `/usr/data/bidhata-menu.conf` -- writable, `adb push` friendly, live without reflash
+2. `/usr/bin/bidhata-menu.conf` -- baked into image (`bidhata-patch.sh` installs the default)
+3. Hardcoded fallback in `src/menu_config.c` -- menu can never be empty
+
+Live edit (no reflash):
 
 ```bash
-adb shell /usr/bin/bidhata-toggle.sh player
-adb reboot
+adb push my.conf /usr/data/bidhata-menu.conf
+adb shell /usr/bin/bidhata-toggle.sh launch-menu   # test now
+```
 
-# and to bring the menu back
-adb shell /usr/bin/bidhata-toggle.sh menu
+---
+
+## 🎨 Optional: Compress Utilities -- On or Off with One Flag
+
+Embedded FLAC/MP3 cover art can be 2000px+ (HiBy still decodes it on a 480px screen). The shrinker resizes to 480, re-encodes as JPEG, saves RAM + SD + scan time. It's completely optional.
+
+**Inside `bidhata-menu`:** `tools/compress-art/compress_art` + two batch shells. Everything there is self-contained; the top-level `tools/compress-art/` is just a legacy mirror now.
+
+| How | What happens |
+|-----|--------------|
+| **Default (on)** | Patch installs `compress_art` to `/usr/bin/compress_art` + scripts + two menu rows. Just flash. |
+| **`BIDHATA_COMPRESS=0 --no-compress`** | Omit binary + strip compress rows from config. Menu ships without them. |
+| **Edit config** | Delete/comment the two `COMPRESS` lines -- rows vanish, binary stays but unused. |
+| **No binary but rows present** | Rows show, command fails gracefully, warns how to build. |
+
+Examples:
+
+```bash
+./bidhata-menu/patch/bidhata-patch.sh squashfs-root                       # with compress (default)
+BIDHATA_COMPRESS=0 ./bidhata-menu/patch/bidhata-patch.sh squashfs-root     # without
+./bidhata-menu/patch/bidhata-patch.sh --no-compress squashfs-root          # same, CLI flag
+
+# Build compress for device:
+make -C bidhata-menu/tools/compress-art CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
+```
+
+On device (from menu or ADB):
+
+```bash
+# Via menu: UTILITIES -> COMPRESS FILE ART / COMPRESS ALBUM ART
+# Via ADB:
+adb shell compress_art_all.sh            # embedded art, whole SD
+adb shell compress_folder_art.sh -f      # standalone folder art
+```
+
+Placement after patch: `compress_art` → `/usr/bin/compress_art`, shells → `/usr/bin/compress_art_all.sh` + `/usr/bin/compress_folder_art.sh`.
+
+---
+
+## 🚀 Quick Deploy (ADB, no flash)
+
+For iteration without reflashing -- rootfs is squashfs, `/usr/data` shadows it:
+
+```bash
+cd bidhata-menu
+make clean
+make CROSS=/opt/mipsel-linux-musl-cross/bin/mipsel-linux-musl- STATIC=1
+make deploy                       # pushes to /usr/data/bidhata-menu
+adb shell /usr/bin/bidhata-toggle.sh launch-menu   # open now
+```
+
+Boot toggle:
+
+```bash
+adb shell /usr/bin/bidhata-toggle.sh player   # skip menu next boot
+adb shell /usr/bin/bidhata-toggle.sh menu     # menu every boot (default)
+adb shell /usr/bin/bidhata-toggle.sh status   # what's installed + mode
 adb reboot
 ```
 
-### How it works
+SD lives at `/data/mnt/sd_0` (not `/mnt/sd_0`); launcher mounts it itself before menu starts. Player remounts on launch -- harmless to leave mounted.
 
-Stock boot chain: `inittab` → `rcS` → `/etc/init.d/S92_03_start_music_player`
-→ `hiby_player.sh`. Firmware image changes that init script's `PL01=` line to
-point at `bidhata-launcher.sh` instead.
+---
 
-Rootfs is read-only squashfs — nothing can rewrite that init script on a
-running device. `bidhata-toggle.sh` switches modes via a flag file on the
-writable `/usr/data` partition: `/usr/data/bidhata_boot_mode` containing `player`
-makes the launcher skip the menu, start the music player straight away.
+## 💿 Building a Flashable `.upt`
 
-The launcher never starts the music player or another target itself: it
-exits with status 10 to request the player (the "player" sentinel config
-row), or a generic status to request whatever it just wrote to
-`/usr/data/bidhata_exec_target` (any other `run` row) — `bidhata-launcher.sh`
-does the actual starting. Any other exit — crash, no screen, no working
-buttons — also falls through to the music player, so a broken launcher
-can't leave the device stuck. `hiby_player.sh` is untouched in the image —
-the stock path is always recoverable.
+### One command (isolated work dir, leaves tree untouched)
 
-## Controls
+```bash
+./bidhata-menu/patch/build-firmware.sh r1_stock.upt r1_bidhata.upt
+# Flash r1_bidhata.upt like any HiBy update: SD root -> Settings -> Firmware Update -> Via SD-card
+```
 
-R1 has only three buttons — volume rocker, Next Track, Power. No Play/Pause
-key on this hardware, so **Next Track confirms**.
+### By hand (inspectable tree)
+
+```bash
+./unpack.sh r1_stock.upt                                 # from project root
+./bidhata-menu/patch/bidhata-patch.sh squashfs-root     # install
+./repack.sh                                              # writes r1_repacked.upt
+# optional: --no-compress or BIDHATA_COMPRESS=0 to omit compress
+```
+
+**What changes:** 4-7 files + one init edit, nothing else. `hiby_player.sh` untouched.
+
+| Change | Path |
+|--------|------|
+| Menu binary | `/usr/bin/bidhata-menu` |
+| Launcher | `/usr/bin/bidhata-launcher.sh` |
+| Toggle | `/usr/bin/bidhata-toggle.sh` |
+| Menu config | `/usr/bin/bidhata-menu.conf` |
+| Compress (optional) | `/usr/bin/compress_art` + two `.sh` |
+| Boot redirect | `/etc/init.d/S9*_start_music_player` (`PL01=.../bidhata-launcher.sh`) |
+
+Revert:
+
+```bash
+./bidhata-menu/patch/bidhata-patch.sh --check  squashfs-root
+./bidhata-menu/patch/bidhata-patch.sh --revert squashfs-root   # restores stock, removes added files
+```
+
+`--revert` uses a hidden dotfile backup (`.S92_03_....bidhata-orig`) so `rcS`'s `S*` glob never double-starts the player -- the old visible-backup race is gone forever. You're welcome, future you.
+
+---
+
+## 🎮 Controls
+
+R1 has three physical buttons + touch. No Play/Pause, so Next Track does the honors.
 
 | Control | Action |
 |---------|--------|
 | Vol Up | Move up |
 | Vol Down | Move down |
-| Next Track | Select |
-| Power | Quit to music player |
+| Next Track | Select / Confirm |
+| Power | Back (submenu) / Quit to player (main) |
 | Tap a row | Select it directly |
 
-## File Structure
+Details: confirm gates start on **CANCEL** (Power always bails). Idle 5s auto-picks **HIBY PLAYER** with a countdown in footer -- freezes the moment you scroll (browsing shouldn't race the clock), re-arms when you enter/leave a submenu or finish a compress.
 
-```
-bidhata-menu/
-├── include/            # Header files
-├── src/
-│   ├── main.c          # Entry point and launcher loop
-│   ├── menu.c          # Boot menu
-│   ├── menu_config.c   # Config file parser (LABEL|COLOR|ACTION|PARAM|CONFIRM_TEXT)
-│   ├── font.c          # 5x7 bitmap font
-│   ├── platform.c      # Framebuffer/input
-│   └── bootmenu.c      # Unused standalone mode selector, superseded by menu.c
-├── config/
-│   └── bidhata-menu.conf.default  # Shipped default, see "Configuring the menu"
-├── scripts/
-│   ├── bidhata-launcher.sh  # Boot script: menu, falling back to the player
-│   └── bidhata-toggle.sh    # Boot-mode switch: menu/player/status/launch
-├── patch/              # Apply to any firmware release
-│   ├── bidhata-patch.sh     # install / --revert / --check against a rootfs
-│   ├── build-firmware.sh  # stock .upt in, patched .upt out
-│   └── payload/        # prebuilt MIPS binary and scripts
-├── Makefile
-└── README.md
-```
+---
 
-## Deployment Files
+## 🧠 How It Works (60-second version)
 
-| File | Device Path | Purpose |
-|------|-------------|---------|
-| `bidhata-menu` | `/usr/bin/bidhata-menu` | Boot menu binary (in the firmware image) |
-| `bidhata-launcher.sh` | `/usr/bin/bidhata-launcher.sh` | Boot script |
-| `bidhata-toggle.sh` | `/usr/bin/bidhata-toggle.sh` | Boot-mode switch |
-| `bidhata-menu.conf.default` | `/usr/bin/bidhata-menu.conf` | Bundled default menu config, see "Configuring the menu" |
+Stock: `inittab -> rcS -> S92_03_start_music_player (PL01=hiby_player.sh) -> hiby_player.sh`
 
-## Technical Details
+Patched: `PL01=bidhata-launcher.sh`. Launcher mounts SD, kills any stray `hiby_player` (pre-flight), runs `bidhata-menu`. Exit codes:
 
-- **Input**: Linux evdev (`/dev/input/event*`)
-- **Video**: Direct framebuffer mmap (`/dev/fb0`), 16 or 32 bpp
-- **Target**: Ingenic X1600 (MIPS32-le)
+- `10` -- sentinel `player` picked: launcher `exec`s `hiby_player`
+- `42` -- other `run` picked: launcher execs what `bidhata-menu` wrote to `/usr/data/bidhata_exec_target`
+- anything else / crash / no fb / no input -- fall through to `hiby_player` so device never bricks
 
-## Known limits / stretch goals
+`/usr/data/bidhata_boot_mode` = `player` => skip menu. Flag lives on writable UBIFS, rootfs stays pristine.
 
-Deliberately not built yet -- noted here rather than silently scope-creeped
-into the config work:
+---
 
-- `bidhata-patch.sh`'s stock-player detection (`hiby_player.sh`) is still a
-  hardcoded string, specific to HiBy-family firmware. Adopting this on a
-  genuinely different (non-HiBy) vendor firmware would need that made
-  configurable too.
-- `bidhata-launcher.sh`'s generic exec dispatch runs every `run`-action
-  target with the same library search path (no `LD_LIBRARY_PATH`
-  override) -- correct for Rockbox on real hardware (see the comment in
-  that script), but a future target that genuinely needs its own bundled
-  libs would need a per-target convention added to the config format,
-  which doesn't exist yet.
+## 📦 Deployment Recap (for your report)
+
+**Upload only `bidhata-menu/`.** That's the deliverable. Everything else derives from it:
+
+- Build both binaries from `bidhata-menu/`
+- Patch any stock `.upt` via `bidhata-menu/patch/`
+- Toggle compress with one env/flag
+- Customize menu by editing one config file, no C rebuild
+
+Bins land where they must:
+
+- `/usr/bin/bidhata-menu` (menu), `/usr/bin/compress_art` + shells (optional), all from `bidhata-menu/patch/payload/` or your fresh build -- exactly where `squashfs-root/usr/bin/` expects them.
+
+---
+
+## 📝 Technical Bits
+
+- **Input:** Linux evdev (`/dev/input/event*`, 0..7 scanned, `O_NONBLOCK`, queued)
+- **Video:** raw `/dev/fb0` mmap, 16/32 bpp, `memset` clear + clipped rects
+- **Targets:** Ingenic X1600, MIPS32r2, static musl (no runtime deps)
+- **Config:** 32 items max, 64/128 char caps, safe truncation with `..`
+- **Idle:** 50ms poll, 5s timeout, freeze on scroll, 1s repaint tick
+
+---
+
+## 🚧 Known Limits (honest ones)
+
+- Patch's `hiby_player.sh` detection is hardcoded for HiBy-family firmware. Different vendor => needs making configurable.
+- Launcher's `run` dispatch uses stock `LD_LIBRARY_PATH`. Works for Rockbox (stock `libasound.so.2` wins), but a future target needing its own libs would need per-target config plumbing (not built -- deliberately out-of-scope).
+- Submenus are one level deep in testing. Config *can* point a submenu row at another group's name, but nested `submenu` inside a submenu hasn't been torture-tested.
+
+---
+
+*Made with 💙, stb_image, and an unreasonable fondness for exit code 42. Don't Panic.*

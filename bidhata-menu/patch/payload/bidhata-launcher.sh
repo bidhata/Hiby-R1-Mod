@@ -1,41 +1,32 @@
 #!/bin/sh
-# Boot launcher for the HiBy R1.
+# Bidhata Launcher -- the bouncer at the HiBy R1's front door.
+# S92_03_start_music_player runs THIS instead of hiby_player.sh. We show the
+# boot menu, then hand back to the real player (or Rockbox, or whatever
+# chaos you've config'd up) once you pick something.
 #
-# S92_03_start_music_player runs this instead of hiby_player.sh. It shows the
-# boot menu, and starts the stock music player (or Rockbox) when the user
-# picks it.
+# Rootfs is read-only squashfs (the "you can't sit with us" filesystem), so
+# we use a flag file on the writable /usr/data to control behaviour:
 #
-# The rootfs is read-only squashfs, so behaviour is controlled by a flag file on
-# the writable /usr/data partition rather than by editing this script:
+#   /usr/data/bidhata_boot_mode  = "player"  -> skip menu, boot straight to player
+#   anything else / absent                   -> show launcher (hello, gorgeous)
 #
-#   /usr/data/bidhata_boot_mode  containing "player"  -> skip the menu, boot straight
-#                                                   to the music player
-#   anything else, or absent                     -> show the launcher
-#
-# bidhata-toggle.sh writes that flag.
+# bidhata-toggle.sh writes that flag. It's basically a light switch for boot. 
 
 MODE_FLAG=/usr/data/bidhata_boot_mode
 
-# Where the stock firmware mounts the SD card. /data is a symlink to /usr/data,
-# so this lands on the writable UBIFS partition.
+# /data is actually a symlink to /usr/data, so this SD mount lands on UBIFS.
 SD_MOUNT=/data/mnt/sd_0
 
-# /usr/bin holds the copy baked into the firmware. /usr/data is a separate UBIFS
-# partition mounted at boot, so a newer build pushed there over ADB wins, which
-# is what allows testing without reflashing.
+# Prefer a test build at /usr/data (ADB push) over the baked-in one. Like hot-reload, but for firmware.
 MENU=/usr/data/bidhata-menu
 [ -x "$MENU" ] || MENU=/usr/bin/bidhata-menu
 
-# bidhata-menu returns this when the user picked the config's reserved
-# "player" sentinel item.
+# Exit code 10 = "player sentinel picked" (our Hitchhiker's 10 -- not the book's 42, we save that for later).
 EXIT_RUN_PLAYER=10
 
-# bidhata-menu returns this for any other "run" action -- the real command
-# line to exec is whatever it just wrote to EXEC_TARGET_FILE. Generic by
-# design: adding a menu row that launches a different binary (Rockbox, or
-# anything else a config-driven fork wants) needs no changes here, only a
-# new line in bidhata-menu.conf. See
-# docs/superpowers/plans/2026-08-13-bidhata-menu-rename-and-config.md.
+# Exit code 42 = "run whatever's in EXEC_TARGET_FILE" -- yes, THE 42. Don't Panic.
+# Any `run` row except the player sentinel lands here. Adding a new player is
+# just one line in bidhata-menu.conf, zero script edits. We love that for you.
 EXIT_RUN_TARGET=42
 EXEC_TARGET_FILE=/usr/data/bidhata_exec_target
 
@@ -50,13 +41,9 @@ start_battery_log() {
     /usr/bin/batd -v -s -t5 -o "$SD_MOUNT/batlog.txt" &
 }
 
-# Mount the SD card the way the stock firmware does.
-#
-# Nothing mounts it at boot: sys_server performs mounts, but only when asked,
-# and the only thing that ever asks for sd_0 is hiby_player - which the launcher
-# runs in place of. So without this the card is simply not there, and Rockbox's
-# .rockbox/ resource tree can't be found. The player remounts it itself when it
-# starts, so leaving this mounted is harmless.
+# Mount the SD card. Normally hiby_player does this via sys_server, but we
+# RUN INSTEAD OF it -- so the card just sits there unmounted like a forgotten USB
+# stick. We handle it ourselves: try mmcblk0/1, vfat/exfat, read-only first (trust no one).
 mount_sd_card() {
     # Already mounted (by a previous run, or by the player before a restart).
     if grep -q " $SD_MOUNT " /proc/mounts 2>/dev/null; then
@@ -66,8 +53,7 @@ mount_sd_card() {
 
     mkdir -p "$SD_MOUNT" 2>/dev/null
 
-    # MMC probing is asynchronous, and this runs early in the boot, so the node
-    # may not exist yet. Wait briefly rather than declaring the card missing.
+    # MMC probing is async at boot -- /dev nodes may not exist yet. We poll, because patience is a virtue and reboots are not.
     waited=0
     while [ "$waited" -lt 50 ]; do
         if [ -b /dev/mmcblk0 ] || [ -b /dev/mmcblk1 ]; then
@@ -77,30 +63,14 @@ mount_sd_card() {
         waited=$((waited + 1))
     done
 
-    # The SD card is mmcblk0: internal storage is raw NAND mounted as UBIFS
-    # (see mount_ubifs.sh), not MMC, so nothing else claims that number, and
-    # adboff exports /dev/mmcblk0 as USB mass storage - which is the card.
-    # mmcblk1 is the second, normally empty slot sys_server also scans; it is
-    # tried afterwards in case a variant populates it. The bare device covers
-    # cards written without a partition table.
+    # mmcblk0 = SD card (NAND is UBIFS, not MMC, so no conflict). mmcblk1 = second slot (usually empty). Bare device = no partition table -- someone raw-copied. We try all, we're not picky.
     for dev in /dev/mmcblk0p1 /dev/mmcblk0 /dev/mmcblk1p1 /dev/mmcblk1; do
         [ -b "$dev" ] || continue
 
-        # Mount the first card that answers, read-only first: if it turns out
-        # to be wrong somehow, nothing on it has been modified.
+        # Mount read-only first (don't touch it until we know it's ours), then remount rw so battery logs & Rockbox can write.
+        # MUST pass $dev explicitly: /data is a symlink and `mount -o remount $SD_MOUNT` silently no-ops. Found out the hard way on-device. Classic symlink gotcha, like aliasing your twin's homework.
         mount -t vfat,exfat -o ro "$dev" "$SD_MOUNT" 2>/dev/null ||
             mount -o ro "$dev" "$SD_MOUNT" 2>/dev/null || continue
-
-        # Remount read-write so the battery log can be written to it, and so
-        # Rockbox can write its playlist/database state there too. Staying
-        # read-only is survivable, so a failure here is not fatal.
-        #
-        # Must pass $dev explicitly rather than just "$SD_MOUNT": /data is a
-        # symlink to /usr/data, but /proc/mounts records the resolved real
-        # path, so this device's `mount -o remount` fails to find a match by
-        # the symlinked target path alone ("can't find /data/mnt/sd_0 in
-        # /proc/mounts") and silently no-ops, leaving the card read-only for
-        # the rest of the session. Confirmed live on-device.
         mount -o remount,rw "$dev" "$SD_MOUNT" 2>/dev/null ||
             log "$SD_MOUNT stays read-only, saves will not persist"
 
@@ -116,49 +86,30 @@ start_player() {
     killall    hiby_player  >/dev/null 2>&1
     killall -9 hiby_player  >/dev/null 2>&1
     /usr/bin/hiby_player
-    # The stock script reboots once the player exits; keep that behaviour so the
-    # device does not sit at a blank screen. reboot only signals init and returns
-    # straight away, so exit rather than falling back into the launcher while the
-    # shutdown runs.
+    # Player exited? Reboot -- don't leave a blank screen like a projector with no film.
     sleep 1
     reboot
     exit 0
 }
 
-# Generic hand-off for any config-defined "run" item other than the
-# reserved player sentinel (Rockbox by default, or whatever else a
-# customized bidhata-menu.conf adds -- see EXEC_TARGET_FILE above). No
-# per-target special-casing here by design: the whole point of the config
-# format is that adding a menu row that launches a different binary never
-# touches this script.
-#
-# Deliberately NOT setting LD_LIBRARY_PATH: tested against real hardware
-# with rockbox.r1 specifically, and the freshly cross-built alsa-lib it
-# ships fails to open the device's ALSA control ("amixer: Control device
-# hw:0 open error: Invalid argument"), while the device's own stock
-# libasound.so.2 -- the same one hiby_player already uses for these same
-# custom controls (Output Port Switch, DOP_EN, ...) -- works correctly. So
-# every target here runs with the default library search path and picks up
-# the device's own copy. A future target that genuinely needs its own
-# bundled libs would need this revisited, not silently worked around.
+# Hand-off for any `run` row that isn't the player sentinel (Rockbox, crackers, your custom thing).
+# We intentionally DON'T set LD_LIBRARY_PATH: Rockbox's bundled alsa-lib breaks on this hardware
+# ("amixer: Control device hw:0 open error"), but the stock libasound.so.2 works fine.
+# So we let every target pick up the device's own copy. Future-proof? Ish. But battle-tested.
 start_target() {
     cmdline=$1
     target_bin=$(basename "${cmdline%% *}")
     killall    "$target_bin"  >/dev/null 2>&1
     killall -9 "$target_bin"  >/dev/null 2>&1
-    # shellcheck disable=SC2086 -- word-splitting is intentional: $cmdline
-    # is a command line (binary + optional args), not a single path.
+    # shellcheck disable=SC2086 -- intentional word-split: $cmdline is "bin + args"
     $cmdline
-    # Mirrors start_player()'s safety net: if the target ever returns
-    # instead of rebooting or handing off control itself, don't leave the
-    # device sitting at a blank screen.
+    # If target returns instead of staying alive, reboot -- blank screen is not a vibe.
     sleep 1
     reboot
     exit 0
 }
 
-# Explicit "boot to the player" request: skip the menu entirely. Do this before
-# touching the card, so the player mounts it itself exactly as it always has.
+# "Just give me my music" mode -- skip menu, straight to player.
 if [ -f "$MODE_FLAG" ] && [ "$(cat "$MODE_FLAG" 2>/dev/null)" = "player" ]; then
     log "boot mode is player, skipping launcher"
     start_battery_log
@@ -167,6 +118,10 @@ fi
 
 mount_sd_card
 start_battery_log
+
+# Pre-flight: nuke any stray hiby_player ghost before menu owns the framebuffer.
+killall    hiby_player  >/dev/null 2>&1
+killall -9 hiby_player  >/dev/null 2>&1
 
 if [ -x "$MENU" ]; then
     "$MENU"
@@ -181,6 +136,5 @@ else
     log "bidhata-menu not found at $MENU"
 fi
 
-# Every path ends here: the user picked the player, the launcher quit, or it
-# failed outright. The device is never left without something running.
+# Bottom of the world: menu quit/crashed or picked player. Start hiby_player and never return.
 start_player

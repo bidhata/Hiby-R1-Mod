@@ -28,6 +28,8 @@
  * the menu but never ordering. */
 #define IDLE_TIMEOUT_MS 5000
 
+static bool g_idle_frozen = false;
+
 #define ROW_H       56
 #define LIST_TOP    150
 #define MARGIN      24
@@ -337,7 +339,8 @@ bidhata_menu_result_t bidhata_menu_run(bidhata_platform_t *platform, int *start_
     int scroll = 0;
     bool dirty = true;
     int idle_ms = 0;
-    bool idle_frozen = false;
+    if (group[0] == '\0') g_idle_frozen = false;
+    bool idle_frozen = g_idle_frozen;
 
     for (;;) {
         if (selected < scroll) scroll = selected;
@@ -366,8 +369,9 @@ bidhata_menu_result_t bidhata_menu_run(bidhata_platform_t *platform, int *start_
 
         if (key == BIDHATA_KEY_UP || key == BIDHATA_KEY_DOWN) {
             /* Scrolling = browsing. Freeze the countdown -- no one likes being
-             * rushed while they're still deciding. Re-arms on next screen visit. */
+             * rushed while they're still deciding. Sticky across submenus. */
             idle_frozen = true;
+            g_idle_frozen = true;
         }
 
         if (key != BIDHATA_KEY_NONE) {
@@ -414,9 +418,9 @@ bidhata_menu_result_t bidhata_menu_run(bidhata_platform_t *platform, int *start_
                 if (item->action == BIDHATA_ACTION_SUBMENU) {
                     bidhata_menu_result_t sub = bidhata_menu_run(platform, NULL, cfg, item->param);
                     if (sub.action == BIDHATA_MENU_BACK) {
-                        /* Back from submenu -- reset timer, we're home again. */
+                        /* Back from submenu -- reset timer; keep freeze if scrolling already happened. */
                         idle_ms = 0;
-                        idle_frozen = false;
+                        idle_frozen = g_idle_frozen;
                         dirty = true;
                         break;
                     }
@@ -430,7 +434,7 @@ bidhata_menu_result_t bidhata_menu_run(bidhata_platform_t *platform, int *start_
                     snprintf(done, sizeof(done), "%s DONE", item->label);
                     run_maintenance_action(platform, working, done, item->param, item->color);
                     idle_ms = 0;
-                    idle_frozen = false;
+                    idle_frozen = g_idle_frozen;
                     dirty = true;
                     break;
                 }

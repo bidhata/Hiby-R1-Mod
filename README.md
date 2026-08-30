@@ -138,7 +138,7 @@ Large embedded cover art (common in FLACs) slows down library scans and browsing
 
 ### From the device — easiest way
 
-Reboot into the **GAME BOY** launcher (it's what you see every boot unless you've toggled straight to the player — see [Boot straight to the music player](#boot-straight-to-the-music-player-skip-the-menu)), then scroll down past your ROM list to:
+Reboot into the **GAME BOY** launcher (which appears on every boot, unless you use `scripts/gb-toggle.sh` to set yourself up to boot straight into the music player). Then scroll down past your ROM list to:
 
 - **STRIP FILE ART** — removes art embedded *inside* your FLAC/MP3 files.
 - **STRIP ALBUM ART** — deletes standalone cover image files (`folder.jpg`, `cover.png`, etc.) sitting in your album folders.

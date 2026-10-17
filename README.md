@@ -1,6 +1,24 @@
+**Please remember:** this is a community reverse-engineering mod, not an official HiBy release. Everything below was verified by diffing a full unpacked stock rootfs against the modded one, file by file. Test it, break it, report back. Also, I'm not a developer — I'm just a **curious reverse-engineering addict** who can't resist poking at firmware to see what happens. 😄
+
+I basically flip every switch I can find, cross my fingers, and release the modded firmware into the wild. There's no way I can test every single feature or setting on my own. So think of this as a community experiment: you break it, test it, report it, and together we'll figure out what actually works and what still needs tweaking. Every bug report, success story, and weird discovery helps make the next release better. Without your feedback, I'm just a guy enthusiastically pressing random buttons in an editor.
+>I am currently raising funds to purchase other HiBy devices to expand this modding ecosystem.
+> 
+> ### 🎯 Target: $200 USD
+> Your support directly funds the purchase of hardware for reverse engineering and firmware testing. Next Targeted devicees - Hiby R3 Pro II, Hiditzs AP80 Pro-X, Tempotec V1 and others
+> 
+> **💖 [Sponsor me on GitHub](https://github.com/sponsors/bidhata?frequency=one-time&sponsor=bidhata)**
+>
+> via **USDT :** 0xcb6989985389f0a983bb20582d97e665128735e1 ( BEP20 )
+>
+> via **Paypal :** bidhata@gmail.com 
+>
+> **Every dollar keeps this project alive and motivates future updates!**
+
+
+
 # 🔬 HiBy R1 Firmware V2.0: A Teardown, Byte by Byte
 
-> HiBy pushed V2.0 to their OTA server before posting a public download link anywhere, so I asked the server politely and it handed it over. Then I spent a weekend inside a MIPS binary with Ghidra and a lot of coffee. This is what I found.
+> HiBy pushed V2.0 to their OTA server before posting a public download link anywhere, so I asked the server politely and it handed it over. Then I spent a weekend inside a MIPS binary with Ghidra and a lot of coffee. This is what I found.  Stock Download URL :https://oss.hiby.com/HiBy%20R1/en-us/2.0/17918591029925z1p5n0e9d5j4r1m4n6.upt
 >
 > The rule this time: **nothing here is a guess from `strings`.** Every claim about `hiby_player` was traced to the code that actually uses it. (Lesson learned the hard way. More on that in §9.)
 

@@ -79,12 +79,15 @@ def main():
     
     # 3. Find code cave (40 bytes of \x00)
     cave_size = 40
-    zeros = b'\x00' * cave_size
-    # Search in executable regions (.text or .rodata, starting around 0x300000)
-    cave_idx = data.find(zeros, 0x300000)
-    if cave_idx == -1:
+    # Search in executable regions (.text or .rodata, starting around 0x300000).
+    # Leave the first zero as the previous string's terminator and 4-byte align
+    # the cave start (MIPS instructions must be word aligned).
+    zeros = b'\x00' * (cave_size + 4)
+    run_idx = data.find(zeros, 0x300000)
+    if run_idx == -1:
         print("Error: Could not find code cave of 40 zero bytes.")
         sys.exit(1)
+    cave_idx = (run_idx + 4) & ~3
         
     cave_vaddr = cave_idx + 0x400000
     print(f"[+] Found code cave at file offset {hex(cave_idx)} (vaddr {hex(cave_vaddr)})")

@@ -10,8 +10,9 @@
 #      the Harmonic Controller slider dialog instead.
 #   2. Hooks the boot-time settings load so the saved level is applied at startup.
 #   3. Rescales the effect from (65536 - L) / 65536 to (SCALE - L) / SCALE. Stock
-#      tops out at a ~-62 dB 2nd harmonic, which is inaudible. With SCALE = 512,
-#      L = 16 gives ~-44 dB (0.7%), L = 64 ~-32 dB (2.6%), L = 255 ~-19 dB (10.6%).
+#      tops out at a ~-62 dB 2nd harmonic, which is inaudible. With SCALE = 1024,
+#      L = 64 gives ~-38 dB (1.3%), L = 128 ~-32 dB (2.6%), L = 255 ~-26 dB (5.3%).
+#      (512 tested too harsh on a real device: near break-up at L = 243.)
 #
 # Everything is located by instruction signature, not fixed offsets.
 # The new boot code goes in the zero padding at the end of the executable segment.
@@ -21,7 +22,7 @@ import struct
 import sys
 
 BASE = 0x400000
-SCALE = 512  # power of two so 1/SCALE is exact; must be > 255
+SCALE = 1024  # power of two so 1/SCALE is exact; must be > 255
 
 
 def main():

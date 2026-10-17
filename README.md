@@ -384,6 +384,27 @@ None of these skips PCM. So either 2.6% H2 is simply subtle on music (likely), o
 
 **On the R1 (stock):** the DSP code is pure software, so it would run. But the Darwin menu can't be opened. The R1's resources have no `vg_listview_darwin` / `dw_*` layout files and no launcher or pull-down entry for it, and the rest of Darwin (NOS, `.flt` filters, `osr_bypass` on `jz-spi0.0`) needs the FPGA the R-series has and the R1 doesn't. Turning harmonics on would mean setting 0x6b some other way (a patched default, or a small new settings row).
 
+  - It does run: the headphone output uses 32-bit samples, which matches the effect's code. Only DSD playback skips it.
+  - It's far too faint: HiBy's formula shrinks the negative half of the waveform by level / 65536. Even at 255 that's 0.39%, which makes a 2nd harmonic around −62 dB
+    (0.08%). That's inaudible through IEMs. On HiBy's R-series it probably works together with their hardware filters, so on its own it does almost nothing.
+  
+  Fix: I kept HiBy's code and changed the 65536 to 2048, so the same slider now covers an audible range:
+  
+  ┌────────┬──────────────────┬──────────────────────────────────────────────────┐
+  │ Slider │   2nd harmonic   │                  What to expect                  │
+  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
+  │ 32     │ ≈ −50 dB (0.33%) │ subtle                                           │
+  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
+  │ 128    │ ≈ −38 dB (1.3%)  │ clearly warmer                                   │
+  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
+  │ 255    │ ≈ −32 dB (2.6%)  │ strong, like a single-ended tube amp pushed hard │
+  └────────┴──────────────────┴──────────────────────────────────────────────────┘
+  
+  To make it, I added a 3rd part to patch_harmonic.py. It swaps two instructions and adds one new constant, I checked the result by disassembly, and running the script
+  twice changes nothing. If 255 turns out too much or too little, I can change the scale (1024 is stronger, 4096 gentler).
+  
+
+
 **The mod fixes this** with `Old_New_Mods/patch_harmonic.py`:
 - The System settings row `operating_instruction` (the online manual, row 0x21) now opens HiBy's own Harmonic Controller slider (`FUN_004efc60`). The branch at `0x4dd2f0` gets the same 5-instruction call the brightness row uses.
 - The row is relabelled in all 13 languages, using each language's own `Harmonic_control` translation from `darwin.ini`.

@@ -380,7 +380,7 @@ That's single-ended-tube territory at the top of the slider. 🔥
 - The loop length is in bytes: `FUN_0072c280` divides by channels × bits / 8 for `WRITEI_FRAMES`.
 - Samples are 32-bit, then `>>8` to 24-bit in `FUN_0072cb80`.
 
-None of these skips PCM. So either 2.6% H2 is simply subtle on music (likely), or something only visible at runtime is in the way. The scale is now **512**, so the top of the slider is unmistakable: L=16 ≈ 0.7%, L=64 ≈ 2.6%, L=128 ≈ 5%, L=255 ≈ 10.6% H2. Test with a pure sine tone at 0 vs 255 for a yes/no answer.
+None of these skips PCM. So either 2.6% H2 is simply subtle on music (likely), or something only visible at runtime is in the way. The scale is now **512**, so the top of the slider is unmistakable: L=16 ≈ 0.7%, L=64 ≈ 2.6%, L=128 ≈ 5%, L=255 ≈ 10.6% H2.
 
 **On the R1 (stock):** the DSP code is pure software, so it would run. But the Darwin menu can't be opened. The R1's resources have no `vg_listview_darwin` / `dw_*` layout files and no launcher or pull-down entry for it, and the rest of Darwin (NOS, `.flt` filters, `osr_bypass` on `jz-spi0.0`) needs the FPGA the R-series has and the R1 doesn't. Turning harmonics on would mean setting 0x6b some other way (a patched default, or a small new settings row).
 

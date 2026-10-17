@@ -390,15 +390,19 @@ None of these skips PCM. So either 2.6% H2 is simply subtle on music (likely), o
   
   Fix: I kept HiBy's code and changed the 65536 to 2048, so the same slider now covers an audible range:
   
-  ┌────────┬──────────────────┬──────────────────────────────────────────────────┐
-  │ Slider │   2nd harmonic   │                  What to expect                  │
-  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
-  │ 32     │ ≈ −50 dB (0.33%) │ subtle                                           │
-  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
-  │ 128    │ ≈ −38 dB (1.3%)  │ clearly warmer                                   │
-  ├────────┼──────────────────┼──────────────────────────────────────────────────┤
-  │ 255    │ ≈ −32 dB (2.6%)  │ strong, like a single-ended tube amp pushed hard │
-  └────────┴──────────────────┴──────────────────────────────────────────────────┘
+I made the slider 4× stronger again (scale 512 instead of 2048). The top of the range is now impossible to miss:
+  
+  ┌────────┬──────────────┬────────────────────────────┐
+  │ Slider │ 2nd harmonic │           Expect           │
+  ├────────┼──────────────┼────────────────────────────┤
+  │ 16     │ 0.7%         │ subtle warmth              │
+  ├────────┼──────────────┼────────────────────────────┤
+  │ 64     │ 2.6%         │ the previous maximum       │
+  ├────────┼──────────────┼────────────────────────────┤
+  │ 128    │ 5%           │ obvious tube colour        │
+  ├────────┼──────────────┼────────────────────────────┤
+  │ 255    │ 10.6%        │ clearly audible distortion │
+  └────────┴──────────────┴────────────────────────────┘
   
   To make it, I added a 3rd part to patch_harmonic.py. It swaps two instructions and adds one new constant, I checked the result by disassembly, and running the script
   twice changes nothing. If 255 turns out too much or too little, I can change the scale (1024 is stronger, 4096 gentler).

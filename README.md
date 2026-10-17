@@ -15,6 +15,7 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 > **Every dollar keeps this project alive and motivates future updates!**
 
 
+
 # 🔬 HiBy R1 Firmware V2.0: A Teardown, Byte by Byte
 
 > HiBy pushed V2.0 to their OTA server before posting a public download link anywhere, so I asked the server politely and it handed it over. Then I spent a weekend inside a MIPS binary with Ghidra and a lot of coffee. This is what I found.
@@ -363,6 +364,24 @@ How much? With asymmetry a = level/65536, a sine gets a 2nd harmonic of about a�
 
 It also adds a tiny DC offset (≈ a/π of full scale). Subtle, a seasoning, not a fuzz pedal.
 
+**Real-device verdict: "almost no effect."** That matches the math. HiBy's scale tops out at a −62 dB 2nd harmonic, which is inaudible through IEMs. The path *is* active: the analog device declares 4-byte samples (field `0xd = 4`), so the 32-bit loop fits, and only DSD (`+4 == 2`) skips it. So the mod rescales it. In the writer (`0x721ac4`), `lui v1,0x1` becomes `li v1,2048`, and the 1/65536 load is pointed at a new 1/2048 float in the cave (`0x875b6c`). Gain is now (2048 − L)/2048:
+
+| Level | 2nd harmonic (mod) |
+|---|---|
+| 32 | ≈ −50 dB (0.33%) |
+| 128 | ≈ −38 dB (1.3%) |
+| 255 | ≈ −32 dB (2.6%) |
+
+That's single-ended-tube territory at the top of the slider. 🔥
+
+**Round two: still "almost null" at 2048.** I re-traced every early exit in the analog write callback:
+- `+184` is a one-shot error log.
+- `+4 == 2` is DSD bit-reversal (`FUN_0072cbc0`).
+- The loop length is in bytes: `FUN_0072c280` divides by channels × bits / 8 for `WRITEI_FRAMES`.
+- Samples are 32-bit, then `>>8` to 24-bit in `FUN_0072cb80`.
+
+None of these skips PCM. So either 2.6% H2 is simply subtle on music (likely), or something only visible at runtime is in the way. The scale is now **512**, so the top of the slider is unmistakable: L=16 ≈ 0.7%, L=64 ≈ 2.6%, L=128 ≈ 5%, L=255 ≈ 10.6% H2. Test with a pure sine tone at 0 vs 255 for a yes/no answer.
+
 **On the R1 (stock):** the DSP code is pure software, so it would run. But the Darwin menu can't be opened. The R1's resources have no `vg_listview_darwin` / `dw_*` layout files and no launcher or pull-down entry for it, and the rest of Darwin (NOS, `.flt` filters, `osr_bypass` on `jz-spi0.0`) needs the FPGA the R-series has and the R1 doesn't. Turning harmonics on would mean setting 0x6b some other way (a patched default, or a small new settings row).
 
 **The mod fixes this** with `Old_New_Mods/patch_harmonic.py`:
@@ -377,16 +396,22 @@ It also adds a tiny DC offset (≈ a/π of full scale). Subtle, a seasoning, not
 
 ## 🧪 10. The V2.0 mod build
 
-All of the above, turned into a flashable firmware: `mod/build_mod.sh` starts from stock V2.0 every time and writes `mod/r1_v2.0_mod.upt`.
+All of the above, turned into a flashable firmware.
 
 | What | Change |
 |---|---|
-| Boot | Bidhata boot menu + new 480×800 logos for all three themes |
+| Boot | Bidhata boot menu + new 480×800 "HiBy R1 · with Bidhata's" logos for all three themes |
 | `hiby_player` | brightness down to 1, the hidden **Bluetooth receiver** screen unlocked (with the fixed cave; see §9.6) |
 | Play settings | SD-card song DB (200k library), SD-card art cache, CUE + OTG scan rows, settings saved around DAC mode |
 | System settings | **Harmonic Controller** (0–255 slider, §9.7), plus rows for USB device mode (DAC), USB current limited and car mode. All still off until you turn them on. (Rotation was dropped after device testing proved it dead.) |
-| Audio | no volume warning popup, last MDB/LDB volume step 12 → 0 |
+| Audio | no volume warning popup **and no 50/100 headphone cap** (`lock_vol` 50 → 100, see below), last MDB/LDB volume step 12 → 0 |
 | Storage | `noatime` on root and userdata, SD read-ahead 2048 KB, slower cache reclaim (via a new `S91_bidhata_tune` init script, because the boot menu skips `hiby_player.sh`) |
+
+**The volume-lock gotcha (found by a real-device test):** setting **0x7a** ("volume locked", default 1) makes `FUN_00416de0` cap the max volume at `lock_vol` (headset **50**). Stock firmware only clears 0x7a when you accept the "Extended exposure to high volume…" dialog. With `vol_warn_enable: 0` that dialog never appears, so the old mod left you **stuck at 50 with "Set maximum volume reached"**. Setting `lock_vol` to 100 turns the lock into a no-op.
+
+**Round two:** the popup still appeared. There's a *second* trigger. At every boot `FUN_004191a0` sets 0x77 = (0x7a == 1). Then `FUN_00536180`, called from the volume handlers `FUN_0043ae40`/`FUN_0043af40`, shows the hearing popup whenever 0x77 == 1 and the new volume is above `warn_vol` (headset 34). **That path never checks `vol_warn_enable`.** Fix: `warn_vol` → 100, which volume can never exceed. The other readers of the warn level only turn the volume number red. Both changes are config-only, no binary patch.
+
+If you flashed an earlier build, raise *Play settings → Max volume* back to 100 once.
 
 **Left out on purpose:**
 - the five do-nothing toggles (rotation joined the club after a real-device test)
@@ -395,7 +420,15 @@ All of the above, turned into a flashable firmware: `mod/build_mod.sh` starts fr
 
 **Checked:** the hash chain and layout match stock, and the rootfs differs from stock *only* in the intended files. Ownership, modes and even CRLF line endings are kept. The kernel is byte-identical to stock.
 
-**Not checked yet:** a real device. That's your job, brave tester. 🫡 Flash it, poke everything, and report back.
+**Real-device scoreboard** (older Broadcom-board R1, 2026-10-17):
+
+| Feature | Result |
+|---|---|
+| Flashing, boot logos, Bidhata menu | ✅ works |
+| Full volume range, no hearing popup | ✅ works (after the `lock_vol` + `warn_vol` fixes) |
+| Harmonic Controller slider | ✅ appears and saves. 🟡 Effect still too faint to hear at scales 65536 and 2048; scale 512 build plus sine-tone test pending |
+| Bluetooth receiver (`bt_input`) | 🟡 screen opens, phone sees the R1, connection fails. Needs `btmon` logs |
+| Everything else | 🟡 untested. Flash it, poke everything, report back 🫡 |
 
 ---
 

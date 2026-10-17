@@ -15,10 +15,9 @@ I basically flip every switch I can find, cross my fingers, and release the modd
 > **Every dollar keeps this project alive and motivates future updates!**
 
 
-
 # 🔬 HiBy R1 Firmware V2.0: A Teardown, Byte by Byte
 
-> HiBy pushed V2.0 to their OTA server before posting a public download link anywhere, so I asked the server politely and it handed it over. Then I spent a weekend inside a MIPS binary with Ghidra and a lot of coffee. This is what I found.  Stock Download URL :https://oss.hiby.com/HiBy%20R1/en-us/2.0/17918591029925z1p5n0e9d5j4r1m4n6.upt
+> HiBy pushed V2.0 to their OTA server before posting a public download link anywhere, so I asked the server politely and it handed it over. Then I spent a weekend inside a MIPS binary with Ghidra and a lot of coffee. This is what I found.
 >
 > The rule this time: **nothing here is a guess from `strings`.** Every claim about `hiby_player` was traced to the code that actually uses it. (Lesson learned the hard way. More on that in §9.)
 
@@ -314,7 +313,7 @@ The master list sits in `.data` at `0x8C2FF4` (stride 0x44, `int id; char name[6
 - Voice recorder: no dmic driver.
 - SPDIF, coax and optical: no jack.
 - AirKiss: no `akiss` binary.
-- `/data/harmonic.json`: zero code references even after the full analysis. A ghost file. 👻
+- `/data/harmonic.json`: zero code references, a leftover from an older JSON-driven version. 👻 But the **Harmonic Controller itself is real**; see §9.7.
 
 ### 9.5 The repo's patch scripts vs V2.0
 
@@ -338,6 +337,42 @@ So the whole software chain is there. **On a real device:** the phone sees the R
 - HiBy hid it for a reason (unfinished on the R1, or a radio/firmware limitation).
 - `btmon` logs from the device will tell which.
 
+### 9.7 The Harmonic Controller: a "tube warmth" knob hiding in the DAC path
+
+"Harmonic Controller" (`Harmonic_control` in `darwin.ini`) is a row in HiBy's **Darwin** menu, next to NOS, Digital Filter and DSD Filter. The chain:
+
+1. Tapping the row (`FUN_004efc60`) opens a slider dialog bound to **setting 0x6b**: 0 = "off", up to 255.
+2. The setter (`FUN_00417800` case 0x6b) → `FUN_00474640` (rejects >255) → `FUN_00721aa0`.
+3. That writes two fields of the **analog output device object** at `0x9292f0`: `+0xc0` = level, and `+0xc4` = gain = (65536 − level) / 65536.
+4. In the analog device's write callback (`0x7255e0`, a label Ghidra never made into a function), if level ≠ 0:
+
+```
+for each 32-bit sample s:
+    if (s < 0) s = (int)(s * gain);     // only the NEGATIVE half-wave is scaled
+```
+
+Shrinking one half of the waveform makes it asymmetric, and asymmetry = **even-order harmonics** (mostly 2nd). That's the classic single-ended-tube "warmth" recipe, done in about 10 MIPS instructions. 🔥
+
+How much? With asymmetry a = level/65536, a sine gets a 2nd harmonic of about a·2/(3π):
+
+| Level | Gain on negative half | 2nd harmonic |
+|---|---|---|
+| 1 | 0.99998 | ≈ −110 dB |
+| 64 | 0.99902 | ≈ −74 dB (0.02%) |
+| 255 (max) | 0.99611 | ≈ −62 dB (0.08%) |
+
+It also adds a tiny DC offset (≈ a/π of full scale). Subtle, a seasoning, not a fuzz pedal.
+
+**On the R1 (stock):** the DSP code is pure software, so it would run. But the Darwin menu can't be opened. The R1's resources have no `vg_listview_darwin` / `dw_*` layout files and no launcher or pull-down entry for it, and the rest of Darwin (NOS, `.flt` filters, `osr_bypass` on `jz-spi0.0`) needs the FPGA the R-series has and the R1 doesn't. Turning harmonics on would mean setting 0x6b some other way (a patched default, or a small new settings row).
+
+**The mod fixes this** with `Old_New_Mods/patch_harmonic.py`:
+- The System settings row `operating_instruction` (the online manual, row 0x21) now opens HiBy's own Harmonic Controller slider (`FUN_004efc60`). The branch at `0x4dd2f0` gets the same 5-instruction call the brightness row uses.
+- The row is relabelled in all 13 languages, using each language's own `Harmonic_control` translation from `darwin.ini`.
+- The level is saved in `/data/user.ini` like every other setting, but stock never re-applies it at boot: the analog device init (which resets it to off) runs before settings load. So the single `jal FUN_00418ec0` (settings load) at `0x47f0ec` now goes to an 11-instruction stub that loads the settings, then calls `FUN_00474640(get(0x6b))`.
+- The stub lives in the 1,216 bytes of zero padding at the end of the executable segment (`0x875b40`), and the first `PT_LOAD`'s size is extended to cover it.
+- Every site is found by instruction signature, and the script is idempotent.
+
+
 ---
 
 ## 🧪 10. The V2.0 mod build
@@ -349,7 +384,7 @@ All of the above, turned into a flashable firmware: `mod/build_mod.sh` starts fr
 | Boot | Bidhata boot menu + new 480×800 logos for all three themes |
 | `hiby_player` | brightness down to 1, the hidden **Bluetooth receiver** screen unlocked (with the fixed cave; see §9.6) |
 | Play settings | SD-card song DB (200k library), SD-card art cache, CUE + OTG scan rows, settings saved around DAC mode |
-| System settings | rows for USB device mode (DAC), USB current limited and car mode. All still off until you turn them on. (Rotation was dropped after device testing proved it dead.) |
+| System settings | **Harmonic Controller** (0–255 slider, §9.7), plus rows for USB device mode (DAC), USB current limited and car mode. All still off until you turn them on. (Rotation was dropped after device testing proved it dead.) |
 | Audio | no volume warning popup, last MDB/LDB volume step 12 → 0 |
 | Storage | `noatime` on root and userdata, SD read-ahead 2048 KB, slower cache reclaim (via a new `S91_bidhata_tune` init script, because the boot menu skips `hiby_player.sh`) |
 

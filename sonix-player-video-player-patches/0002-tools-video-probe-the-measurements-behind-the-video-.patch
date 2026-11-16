@@ -1,0 +1,953 @@
+From a92289eb775f31eae7ac0a05796c03876f746e8b Mon Sep 17 00:00:00 2001
+From: Krish Paul <me@krishnendu.com>
+Date: Tue, 17 Nov 2026 02:55:06 +0800
+Subject: [PATCH 2/2] tools/video-probe: the measurements behind the video
+ player's limits
+
+fbprobe times full-panel RGB565 frames into the framebuffer with no
+decoder in the loop; decprobe decodes a clip with libavcodec, converts
+each frame to RGB565 and reports the time of every stage against the
+clip's frame rate. make-clips.sh encodes one source at four sizes in
+five codecs to run them against.
+
+On the R1, per 30 fps frame, decode plus conversion:
+
+            320x180  480x270  640x360  800x450
+  MPEG-2      4.6      9.0     16.1     25.2  ms
+  MPEG-4      5.2     10.3     18.5     29.0
+  H.264 BP    9.6     20.2     37.5     59.9
+  H.264 HP   11.3     21.1     39.8     66.0
+
+The host ffmpeg is built with --disable-asm: with only --disable-x86asm
+its scaler writes noise, and every clip comes out at the right size and
+bitrate with nothing in it.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ sonix-player/tools/video-probe/.gitignore     |   6 +
+ .../tools/video-probe/build-decprobe.sh       | 104 +++++
+ sonix-player/tools/video-probe/build.sh       |  57 +++
+ sonix-player/tools/video-probe/decprobe.c     | 417 ++++++++++++++++++
+ sonix-player/tools/video-probe/fbprobe.c      | 166 +++++++
+ sonix-player/tools/video-probe/make-clips.sh  | 124 ++++++
+ 6 files changed, 874 insertions(+)
+ create mode 100644 sonix-player/tools/video-probe/.gitignore
+ create mode 100755 sonix-player/tools/video-probe/build-decprobe.sh
+ create mode 100755 sonix-player/tools/video-probe/build.sh
+ create mode 100644 sonix-player/tools/video-probe/decprobe.c
+ create mode 100644 sonix-player/tools/video-probe/fbprobe.c
+ create mode 100755 sonix-player/tools/video-probe/make-clips.sh
+
+diff --git a/sonix-player/tools/video-probe/.gitignore b/sonix-player/tools/video-probe/.gitignore
+new file mode 100644
+index 0000000..6d08766
+--- /dev/null
++++ b/sonix-player/tools/video-probe/.gitignore
+@@ -0,0 +1,6 @@
++# Downloads and build trees of build-decprobe.sh and make-clips.sh.
++.build/
++
++# What build.sh and build-decprobe.sh produce.
++fbprobe
++decprobe
+diff --git a/sonix-player/tools/video-probe/build-decprobe.sh b/sonix-player/tools/video-probe/build-decprobe.sh
+new file mode 100755
+index 0000000..b8785e9
+--- /dev/null
++++ b/sonix-player/tools/video-probe/build-decprobe.sh
+@@ -0,0 +1,104 @@
++#!/usr/bin/env bash
++# Cross-build decprobe for the device: a cut-down static FFmpeg (video decoders
++# and the demuxers around them, nothing else) and the probe on top of it. Ends
++# with the same glibc-2.22 ABI gate as build.sh. Produces
++# tools/video-probe/decprobe (a static MIPS binary).
++#
++# Everything downloaded or built along the way lives in tools/video-probe/.build
++# and can be deleted at any time.
++set -euo pipefail
++
++here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++root="$(cd "$here/../.." && pwd)"   # .../sonix-player/sonix-player
++
++FFMPEG_VER=9.0.2
++FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VER.tar.xz"
++
++TOOLCHAIN="$root/rockbox-toolchain"
++TRIPLET=mipsel-rockbox-linux-gnu
++CC="$TOOLCHAIN/bin/$TRIPLET-gcc"
++READELF="$TOOLCHAIN/bin/$TRIPLET-readelf"
++STRIP="$TOOLCHAIN/bin/$TRIPLET-strip"
++
++if [ ! -x "$CC" ]; then
++	echo "error: cross compiler not found at $CC" >&2
++	echo "       build it first:  ./rockboxdev/rockboxdev.sh" >&2
++	exit 1
++fi
++
++build="$here/.build"
++src="$build/ffmpeg-$FFMPEG_VER"
++obj="$build/ffmpeg-target-obj"
++prefix="$build/ffmpeg-target"
++mkdir -p "$build"
++
++if [ ! -d "$src" ]; then
++	[ -f "$build/ffmpeg-$FFMPEG_VER.tar.xz" ] || curl -fL -o "$build/ffmpeg-$FFMPEG_VER.tar.xz" "$FFMPEG_URL"
++	tar -C "$build" -xf "$build/ffmpeg-$FFMPEG_VER.tar.xz"
++fi
++
++# The decoders worth asking the question of on a single 1 GHz MIPS core with no
++# SIMD. HEVC, VP9 and AV1 are left out on purpose: several times the work of
++# H.264, and H.264 is already the open question.
++DECODERS="h264 mpeg4 msmpeg4v3 mpeg2video mpeg1video mjpeg vp8 flv h263"
++DEMUXERS="mov matroska avi mpegps mpegts flv m4v h264 mpegvideo"
++PARSERS="h264 mpeg4video mpegvideo mjpeg vp8 h263"
++
++# -march=mips32r2 -mno-madd4 -mplt: as the player's own TARGET_CFLAGS (see the
++# Makefile for why). FFmpeg's MIPS assembly is all for extensions the X1600
++# does not have (its /proc/cpuinfo lists no ASE at all), so every one is off
++# and the decoders are plain C.
++if [ ! -f "$prefix/lib/libavcodec.a" ]; then
++	rm -rf "$obj" && mkdir -p "$obj"
++	en=()
++	for d in $DECODERS; do en+=("--enable-decoder=$d"); done
++	for d in $DEMUXERS; do en+=("--enable-demuxer=$d"); done
++	for d in $PARSERS; do en+=("--enable-parser=$d"); done
++	(
++		cd "$obj"
++		PATH="$TOOLCHAIN/bin:$PATH" "$src/configure" \
++			--prefix="$prefix" \
++			--enable-cross-compile --cross-prefix="$TRIPLET-" \
++			--arch=mipsel --target-os=linux --cpu=mips32r2 \
++			--extra-cflags="-mno-madd4 -mplt" \
++			--disable-mipsdsp --disable-mipsdspr2 --disable-msa --disable-mmi --disable-mipsfpu \
++			--disable-loongson2 --disable-loongson3 \
++			--enable-static --disable-shared --disable-pic \
++			--disable-everything --disable-autodetect --disable-programs --disable-doc \
++			--disable-network --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample \
++			--disable-debug \
++			--enable-protocol=file \
++			"${en[@]}"
++		PATH="$TOOLCHAIN/bin:$PATH" make -j"$(nproc)"
++		PATH="$TOOLCHAIN/bin:$PATH" make install
++	)
++fi
++
++out="$here/decprobe"
++"$CC" -O2 -march=mips32r2 -mno-madd4 -mplt -Wall -Wextra \
++	-static -I"$prefix/include" \
++	-o "$out" "$here/decprobe.c" \
++	-L"$prefix/lib" -lavformat -lavcodec -lavutil -lpthread -lm
++"$STRIP" "$out"
++echo "built: $out"
++
++# ---- the glibc-2.22 ABI gate, same logic as the Makefile's check-abi ----
++bad="$("$READELF" --dyn-syms -W "$out" 2>/dev/null \
++	| awk '{ for (i = 1; i <= NF; i++) if (match($i, /@GLIBC_[0-9.]+$/)) {
++		ver = substr($i, RSTART + 7); n = split(ver, v, ".");
++		if (v[1] > 2 || (v[1] == 2 && v[2] > 22)) print "  " $i;
++	} }' | sort -u || true)"
++
++if [ -n "$bad" ]; then
++	echo "" >&2
++	echo "*** ABI FAIL: asks for symbols newer than glibc 2.22:" >&2
++	echo "$bad" >&2
++	exit 1
++fi
++echo "check-abi: no symbol beyond glibc 2.22."
++
++file "$out" 2>/dev/null || true
++ls -l "$out"
++echo ""
++echo "Next: make test clips (tools/video-probe/make-clips.sh), copy decprobe and the"
++echo "clips to the SD card, stop the player, and run:  ./decprobe clips/*.mkv"
+diff --git a/sonix-player/tools/video-probe/build.sh b/sonix-player/tools/video-probe/build.sh
+new file mode 100755
+index 0000000..58de38e
+--- /dev/null
++++ b/sonix-player/tools/video-probe/build.sh
+@@ -0,0 +1,57 @@
++#!/usr/bin/env bash
++# Cross-compile fbprobe for the device and run the same glibc-2.22 ABI gate the
++# main build uses. Produces tools/video-probe/fbprobe (a MIPS binary).
++#
++# Run from the repo root (sonix-player/) or anywhere; paths are resolved from
++# this script's location.
++set -euo pipefail
++
++here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++root="$(cd "$here/../.." && pwd)"   # .../sonix-player/sonix-player
++
++TOOLCHAIN="$root/rockbox-toolchain"
++CC="$TOOLCHAIN/bin/mipsel-rockbox-linux-gnu-gcc"
++READELF="$TOOLCHAIN/bin/mipsel-rockbox-linux-gnu-readelf"
++STRIP="$TOOLCHAIN/bin/mipsel-rockbox-linux-gnu-strip"
++
++if [ ! -x "$CC" ]; then
++	echo "error: cross compiler not found at $CC" >&2
++	echo "       build it first:  ./rockboxdev/rockboxdev.sh" >&2
++	exit 1
++fi
++
++out="$here/fbprobe"
++
++# Same core target flags as the Makefile's TARGET_CFLAGS: mips32r2, static.
++# No glibc_compat.h needed here -- fbprobe uses only plain libc (open, mmap,
++# ioctl, clock_gettime, printf), none of which is a >2.22 symbol -- but the ABI
++# gate below proves that rather than assuming it.
++"$CC" -O2 -march=mips32r2 -mno-madd4 -mplt -Wall -Wextra \
++	-static \
++	-o "$out" "$here/fbprobe.c"
++
++echo "built: $out"
++
++# ---- the glibc-2.22 ABI gate, same logic as the Makefile's check-abi ----
++# A fully static binary has no versioned dynamic symbols at all, so this is
++# belt-and-braces; it still runs so the probe is held to the same bar as the
++# player.
++bad="$("$READELF" --dyn-syms -W "$out" 2>/dev/null \
++	| awk '{ for (i = 1; i <= NF; i++) if (match($i, /@GLIBC_[0-9.]+$/)) {
++		ver = substr($i, RSTART + 7); n = split(ver, v, ".");
++		if (v[1] > 2 || (v[1] == 2 && v[2] > 22)) print "  " $i;
++	} }' | sort -u || true)"
++
++if [ -n "$bad" ]; then
++	echo "" >&2
++	echo "*** ABI FAIL: asks for symbols newer than glibc 2.22:" >&2
++	echo "$bad" >&2
++	exit 1
++fi
++echo "check-abi: no symbol beyond glibc 2.22."
++
++file "$out" 2>/dev/null || true
++echo ""
++echo "Next: push to the R1 and run it:"
++echo "    adb push $out /tmp/fbprobe && adb shell 'chmod +x /tmp/fbprobe && /tmp/fbprobe 3'"
++echo "  (or copy to the SD card and run from a shell on the device)"
+diff --git a/sonix-player/tools/video-probe/decprobe.c b/sonix-player/tools/video-probe/decprobe.c
+new file mode 100644
+index 0000000..911a07f
+--- /dev/null
++++ b/sonix-player/tools/video-probe/decprobe.c
+@@ -0,0 +1,417 @@
++// decprobe -- software video decode probe for the R1 / R3 Pro II.
++//
++// fbprobe showed what the panel can take with no codec in the loop. This one
++// puts the codec in: it decodes a real clip with libavcodec, converts every
++// frame from YUV 4:2:0 to RGB565 straight into the off-screen framebuffer page
++// (rotated a quarter turn, so a landscape picture fills the portrait panel),
++// and pans to it -- the work a player would do for each frame, with nothing
++// held back to keep time. Every stage is timed on its own.
++//
++// What it answers, per clip: how many frames a second this device can decode
++// and show, against how many the clip needs.
++//
++// Build: tools/video-probe/build-decprobe.sh (cross-builds a cut-down FFmpeg).
++//
++// Usage on device:
++//   ./decprobe [-t seconds] [-j threads] [-n] [-r] [-l] [-f] clip [clip ...]
++//     -t N   stop each clip after N seconds of wall time (default 8, 0 = whole clip)
++//     -j N   decoder threads (default 1; the X1600 has one core)
++//     -n     no framebuffer: convert into ordinary memory instead
++//     -r     no rotation: picture upright, top-left of the panel
++//     -l     H.264: skip the in-loop deblocking filter (faster, not bit-exact)
++//     -f     allow the decoder's non-compliant speed-ups (AV_CODEC_FLAG2_FAST)
++//     -o F   with -n: write the last converted frame to F as raw RGB565, and
++//            the first bytes of its three planes to stdout, to check the picture
++//
++// Stop the player first: both would be panning the same framebuffer.
++
++#include <fcntl.h>
++#include <linux/fb.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <time.h>
++#include <unistd.h>
++
++#include <libavcodec/avcodec.h>
++#include <libavformat/avformat.h>
++#include <libavutil/pixdesc.h>
++
++static double now_ms(void) {
++	struct timespec ts;
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
++}
++
++// ---------------------------------------------------------------- output ----
++
++static int fb_fd = -1;
++static struct fb_var_screeninfo fb_var;
++static uint8_t *fb_mem;
++static size_t fb_page_size;
++static int fb_pages;
++static int out_w = 480, out_h = 800; // the panel, or a stand-in for it with -n
++static uint16_t *ram_page;
++
++// The player's own way in (try_panned_display in src/main.c): 16 bits, tight
++// stride, two pages, flip with FBIOPAN_DISPLAY.
++static int fb_open(void) {
++	struct fb_fix_screeninfo fix;
++
++	fb_fd = open("/dev/fb0", O_RDWR);
++	if (fb_fd < 0) {
++		perror("/dev/fb0");
++		return -1;
++	}
++	if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var) < 0 || ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0) {
++		perror("fb: screen info");
++		return -1;
++	}
++	if (fb_var.bits_per_pixel != 16 || fix.line_length != fb_var.xres * 2) {
++		fprintf(stderr, "fb: not 16 bits with a tight stride\n");
++		return -1;
++	}
++
++	fb_var.yres_virtual = fb_var.yres * 2;
++	fb_var.xres_virtual = fb_var.xres;
++	fb_var.yoffset = 0;
++	fb_pages = 2;
++	if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &fb_var) < 0)
++		fb_pages = 1;
++	ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix);
++
++	fb_page_size = (size_t)fix.line_length * fb_var.yres;
++	if ((size_t)fix.smem_len < fb_page_size * 2)
++		fb_pages = 1;
++
++	fb_mem = mmap(NULL, fb_page_size * fb_pages, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
++	if (fb_mem == MAP_FAILED) {
++		perror("fb: mmap");
++		return -1;
++	}
++	out_w = (int)fb_var.xres;
++	out_h = (int)fb_var.yres;
++	return 0;
++}
++
++// ------------------------------------------------------------ conversion ----
++//
++// BT.601, limited range, by table: what a player on a core with no SIMD would
++// do. One table lookup per term, one more to clamp and pack each channel.
++
++static int32_t tab_y[256], tab_rv[256], tab_gu[256], tab_gv[256], tab_bu[256];
++#define CLAMP_OFF 512
++static uint16_t pack_r[CLAMP_OFF * 2 + 256], pack_g[CLAMP_OFF * 2 + 256], pack_b[CLAMP_OFF * 2 + 256];
++
++static void tables_init(int full_range) {
++	for (int i = 0; i < 256; i++) {
++		if (full_range) {
++			tab_y[i] = i;
++			tab_rv[i] = (int32_t)(1.402 * (i - 128));
++			tab_gu[i] = (int32_t)(-0.344 * (i - 128));
++			tab_gv[i] = (int32_t)(-0.714 * (i - 128));
++			tab_bu[i] = (int32_t)(1.772 * (i - 128));
++		} else {
++			tab_y[i] = (int32_t)(1.164 * (i - 16));
++			tab_rv[i] = (int32_t)(1.596 * (i - 128));
++			tab_gu[i] = (int32_t)(-0.392 * (i - 128));
++			tab_gv[i] = (int32_t)(-0.813 * (i - 128));
++			tab_bu[i] = (int32_t)(2.017 * (i - 128));
++		}
++	}
++	for (int i = 0; i < CLAMP_OFF * 2 + 256; i++) {
++		int v = i - CLAMP_OFF;
++		if (v < 0)
++			v = 0;
++		if (v > 255)
++			v = 255;
++		pack_r[i] = (uint16_t)((v >> 3) << 11);
++		pack_g[i] = (uint16_t)((v >> 2) << 5);
++		pack_b[i] = (uint16_t)(v >> 3);
++	}
++}
++
++#define PIXEL(yv, rr, gg, bb) (uint16_t)(pack_r[CLAMP_OFF + (yv) + (rr)] | pack_g[CLAMP_OFF + (yv) + (gg)] | pack_b[CLAMP_OFF + (yv) + (bb)])
++
++// Upright: source row to destination row, cropped to the panel.
++static void convert_upright(const AVFrame *f, uint16_t *dst) {
++	int w = f->width < out_w ? f->width : out_w;
++	int h = f->height < out_h ? f->height : out_h;
++	w &= ~1;
++	h &= ~1;
++
++	for (int y = 0; y < h; y += 2) {
++		const uint8_t *y0 = f->data[0] + (ptrdiff_t)y * f->linesize[0];
++		const uint8_t *y1 = y0 + f->linesize[0];
++		const uint8_t *u = f->data[1] + (ptrdiff_t)(y / 2) * f->linesize[1];
++		const uint8_t *v = f->data[2] + (ptrdiff_t)(y / 2) * f->linesize[2];
++		uint16_t *d0 = dst + (size_t)y * out_w;
++		uint16_t *d1 = d0 + out_w;
++
++		for (int x = 0; x < w; x += 2) {
++			int rr = tab_rv[*v], gg = tab_gu[*u] + tab_gv[*v], bb = tab_bu[*u];
++			int a = tab_y[y0[0]], b = tab_y[y0[1]], c = tab_y[y1[0]], e = tab_y[y1[1]];
++			d0[0] = PIXEL(a, rr, gg, bb);
++			d0[1] = PIXEL(b, rr, gg, bb);
++			d1[0] = PIXEL(c, rr, gg, bb);
++			d1[1] = PIXEL(e, rr, gg, bb);
++			y0 += 2, y1 += 2, d0 += 2, d1 += 2, u++, v++;
++		}
++	}
++}
++
++// A quarter turn clockwise, centred: source column sx becomes destination row
++// sx, read from the bottom of the picture up. The destination is written in
++// order, two rows at a time; the source is read down its columns.
++static void convert_rotated(const AVFrame *f, uint16_t *dst) {
++	int w = f->width < out_h ? f->width : out_h;   // source width runs down the panel
++	int h = f->height < out_w ? f->height : out_w; // source height runs across it
++	w &= ~1;
++	h &= ~1;
++	int off_x = ((out_w - h) / 2) & ~1;
++	int off_y = ((out_h - w) / 2) & ~1;
++	ptrdiff_t ls = f->linesize[0], lsu = f->linesize[1], lsv = f->linesize[2];
++
++	// In bands of BAND source rows. Going down a whole column at once touches
++	// one cache line per row in each plane, more than the 32 KB data cache
++	// holds, so every read misses (measured: 25 ms a frame at 800x450). Within
++	// a band the same few dozen lines serve 32 columns in a row.
++	enum { BAND = 32 };
++	for (int i0 = 0; i0 < h; i0 += BAND) {
++		int i1 = i0 + BAND < h ? i0 + BAND : h;
++		for (int sx = 0; sx < w; sx += 2) {
++			uint16_t *d0 = dst + (size_t)(off_y + sx) * out_w + off_x + i0;
++			uint16_t *d1 = d0 + out_w;
++			const uint8_t *yp = f->data[0] + (ptrdiff_t)(h - 1 - i0) * ls + sx;
++			const uint8_t *up = f->data[1] + (ptrdiff_t)(h / 2 - 1 - i0 / 2) * lsu + sx / 2;
++			const uint8_t *vp = f->data[2] + (ptrdiff_t)(h / 2 - 1 - i0 / 2) * lsv + sx / 2;
++
++			for (int i = i0; i < i1; i += 2) {
++				int rr = tab_rv[*vp], gg = tab_gu[*up] + tab_gv[*vp], bb = tab_bu[*up];
++				const uint8_t *yq = yp - ls; // the row above
++				int a = tab_y[yp[0]], b = tab_y[yp[1]], c = tab_y[yq[0]], e = tab_y[yq[1]];
++				d0[0] = PIXEL(a, rr, gg, bb);
++				d1[0] = PIXEL(b, rr, gg, bb);
++				d0[1] = PIXEL(c, rr, gg, bb);
++				d1[1] = PIXEL(e, rr, gg, bb);
++				d0 += 2, d1 += 2;
++				yp -= 2 * ls, up -= lsu, vp -= lsv;
++			}
++		}
++	}
++}
++
++// ------------------------------------------------------------- the probe ----
++
++static int opt_seconds = 8, opt_threads = 1, opt_nofb, opt_upright, opt_noloop, opt_fast;
++static const char *opt_dump;
++
++static int is_420(enum AVPixelFormat p) { return p == AV_PIX_FMT_YUV420P || p == AV_PIX_FMT_YUVJ420P; }
++
++static int probe(const char *path) {
++	AVFormatContext *fmt = NULL;
++	AVCodecContext *dec = NULL;
++	AVPacket *pkt = av_packet_alloc();
++	AVFrame *frame = av_frame_alloc();
++	int rc = 1;
++
++	if (avformat_open_input(&fmt, path, NULL, NULL) < 0) {
++		fprintf(stderr, "%s: cannot open\n", path);
++		goto out;
++	}
++	if (avformat_find_stream_info(fmt, NULL) < 0) {
++		fprintf(stderr, "%s: no stream info\n", path);
++		goto out;
++	}
++	const AVCodec *codec = NULL;
++	int vs = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
++	if (vs < 0 || !codec) {
++		fprintf(stderr, "%s: no video stream this build can decode\n", path);
++		goto out;
++	}
++	AVStream *st = fmt->streams[vs];
++	dec = avcodec_alloc_context3(codec);
++	avcodec_parameters_to_context(dec, st->codecpar);
++	dec->thread_count = opt_threads;
++	if (opt_noloop)
++		dec->skip_loop_filter = AVDISCARD_ALL;
++	if (opt_fast)
++		dec->flags2 |= AV_CODEC_FLAG2_FAST;
++	if (avcodec_open2(dec, codec, NULL) < 0) {
++		fprintf(stderr, "%s: cannot open the %s decoder\n", path, codec->name);
++		goto out;
++	}
++
++	AVRational fr = st->avg_frame_rate.num ? st->avg_frame_rate : st->r_frame_rate;
++	double clip_fps = fr.den ? av_q2d(fr) : 0;
++	double budget = clip_fps > 0 ? 1000.0 / clip_fps : 0;
++	double kbps = fmt->bit_rate > 0 ? fmt->bit_rate / 1000.0 : 0;
++
++	double t_dec = 0, t_conv = 0, t_pan = 0, worst = 0;
++	long frames = 0, late = 0, unconverted = 0;
++	int page = 0, tables_ready = 0, eof = 0;
++	double start = now_ms();
++
++	while (!eof) {
++		double t0 = now_ms();
++		int r = av_read_frame(fmt, pkt);
++		if (r < 0) {
++			avcodec_send_packet(dec, NULL); // drain
++			eof = 1;
++		} else if (pkt->stream_index == vs) {
++			avcodec_send_packet(dec, pkt);
++		}
++		if (r >= 0)
++			av_packet_unref(pkt);
++
++		for (;;) {
++			r = avcodec_receive_frame(dec, frame);
++			double t1 = now_ms();
++			// Reading and demuxing count as decode time: a player pays for them too.
++			if (r < 0) {
++				t_dec += t1 - t0;
++				break;
++			}
++			double d = t1 - t0, c = 0, p = 0;
++
++			if (is_420(frame->format)) {
++				if (!tables_ready) {
++					tables_init(frame->color_range == AVCOL_RANGE_JPEG || frame->format == AV_PIX_FMT_YUVJ420P);
++					tables_ready = 1;
++				}
++				uint16_t *dst = fb_mem ? (uint16_t *)(fb_mem + (page ? fb_page_size : 0)) : ram_page;
++				if (opt_upright)
++					convert_upright(frame, dst);
++				else
++					convert_rotated(frame, dst);
++				double t2 = now_ms();
++				c = t2 - t1;
++				if (opt_dump && frames == 60) {
++					printf("  frame 60: linesize %d %d %d, Y %d %d %d %d, U %d %d %d %d, V %d %d %d %d (mid-picture)\n", frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->data[0][frame->linesize[0] * (frame->height / 2) + 100], frame->data[0][frame->linesize[0] * (frame->height / 2) + 200], frame->data[0][frame->linesize[0] * (frame->height / 2) + 300], frame->data[0][frame->linesize[0] * (frame->height / 2) + 400], frame->data[1][frame->linesize[1] * (frame->height / 4) + 50], frame->data[1][frame->linesize[1] * (frame->height / 4) + 100], frame->data[1][frame->linesize[1] * (frame->height / 4) + 150], frame->data[1][frame->linesize[1] * (frame->height / 4) + 200], frame->data[2][frame->linesize[2] * (frame->height / 4) + 50], frame->data[2][frame->linesize[2] * (frame->height / 4) + 100], frame->data[2][frame->linesize[2] * (frame->height / 4) + 150], frame->data[2][frame->linesize[2] * (frame->height / 4) + 200]);
++					FILE *o = fopen(opt_dump, "wb");
++					if (o) {
++						fwrite(dst, 2, (size_t)out_w * out_h, o);
++						fclose(o);
++					}
++				}
++				if (fb_mem) {
++					fb_var.yoffset = page ? fb_var.yres : 0;
++					ioctl(fb_fd, FBIOPAN_DISPLAY, &fb_var);
++					if (fb_pages == 2)
++						page ^= 1;
++					p = now_ms() - t2;
++				}
++			} else {
++				unconverted++;
++			}
++
++			t_dec += d, t_conv += c, t_pan += p;
++			if (d + c + p > worst)
++				worst = d + c + p;
++			if (budget > 0 && d + c + p > budget)
++				late++;
++			frames++;
++			av_frame_unref(frame);
++			t0 = now_ms();
++		}
++
++		if (opt_seconds > 0 && now_ms() - start > opt_seconds * 1000.0)
++			break;
++	}
++
++	if (frames == 0) {
++		fprintf(stderr, "%s: no frame came out\n", path);
++		goto out;
++	}
++
++	double per = (t_dec + t_conv + t_pan) / frames;
++	double can = 1000.0 / per;
++	const char *name = strrchr(path, '/');
++	name = name ? name + 1 : path;
++
++	printf("%s\n", name);
++	printf("  %s %s, %dx%d, %s, %.2f fps, %.0f kbit/s\n", codec->name, avcodec_profile_name(dec->codec_id, dec->profile) ? avcodec_profile_name(dec->codec_id, dec->profile) : "-", dec->width, dec->height, av_get_pix_fmt_name(dec->pix_fmt) ? av_get_pix_fmt_name(dec->pix_fmt) : "?", clip_fps, kbps);
++	printf("  per frame: decode %.1f ms + convert %.1f ms + pan %.1f ms = %.1f ms   (worst frame %.1f ms)\n", t_dec / frames, t_conv / frames, t_pan / frames, per, worst);
++	if (clip_fps > 0) {
++		printf("  can do %.1f fps, clip needs %.1f  ->  %.0f%% of real time, %ld of %ld frames over budget: %s\n", can, clip_fps, 100.0 * can / clip_fps, late, frames, can >= clip_fps * 1.25 ? "PLAYS" : can >= clip_fps ? "MARGINAL" : "TOO SLOW");
++	} else {
++		printf("  can do %.1f fps (%ld frames)\n", can, frames);
++	}
++	if (unconverted)
++		printf("  note: pixel format is not 4:2:0, so no frame was converted or shown\n");
++	// One line a script can pick out.
++	printf("CSV,%s,%s,%dx%d,%.2f,%.0f,%.2f,%.2f,%.2f,%.1f,%ld,%ld\n", name, codec->name, dec->width, dec->height, clip_fps, kbps, t_dec / frames, t_conv / frames, t_pan / frames, can, late, frames);
++	fflush(stdout);
++	rc = 0;
++
++out:
++	av_frame_free(&frame);
++	av_packet_free(&pkt);
++	avcodec_free_context(&dec);
++	avformat_close_input(&fmt);
++	return rc;
++}
++
++int main(int argc, char **argv) {
++	int c;
++	while ((c = getopt(argc, argv, "t:j:nrlfo:")) != -1) {
++		switch (c) {
++		case 't':
++			opt_seconds = atoi(optarg);
++			break;
++		case 'j':
++			opt_threads = atoi(optarg);
++			break;
++		case 'n':
++			opt_nofb = 1;
++			break;
++		case 'r':
++			opt_upright = 1;
++			break;
++		case 'l':
++			opt_noloop = 1;
++			break;
++		case 'f':
++			opt_fast = 1;
++			break;
++		case 'o':
++			opt_dump = optarg;
++			break;
++		default:
++			fprintf(stderr, "usage: %s [-t seconds] [-j threads] [-n] [-r] [-l] [-f] clip [clip ...]\n", argv[0]);
++			return 2;
++		}
++	}
++	if (optind >= argc) {
++		fprintf(stderr, "usage: %s [-t seconds] [-j threads] [-n] [-r] [-l] [-f] clip [clip ...]\n", argv[0]);
++		return 2;
++	}
++
++	av_log_set_level(AV_LOG_ERROR);
++
++	if (!opt_nofb && fb_open() < 0) {
++		fprintf(stderr, "no framebuffer: converting into memory instead\n");
++		fb_mem = NULL;
++	}
++	if (fb_mem == MAP_FAILED)
++		fb_mem = NULL;
++	if (!fb_mem) {
++		ram_page = malloc((size_t)out_w * out_h * 2);
++		if (!ram_page)
++			return 1;
++	}
++
++	printf("decprobe: %s, output %dx%d %s, %s, %d thread(s)%s%s\n", av_version_info(), out_w, out_h, fb_mem ? (fb_pages == 2 ? "framebuffer, two pages" : "framebuffer, one page") : "memory", opt_upright ? "upright" : "rotated", opt_threads, opt_noloop ? ", no loop filter" : "", opt_fast ? ", fast flag" : "");
++	printf("CSV,clip,codec,size,clip_fps,kbps,decode_ms,convert_ms,pan_ms,can_fps,late,frames\n");
++
++	int failed = 0;
++	for (int i = optind; i < argc; i++) {
++		if (fb_mem)
++			memset(fb_mem, 0, fb_page_size * fb_pages);
++		failed |= probe(argv[i]);
++	}
++	return failed;
++}
+diff --git a/sonix-player/tools/video-probe/fbprobe.c b/sonix-player/tools/video-probe/fbprobe.c
+new file mode 100644
+index 0000000..719e143
+--- /dev/null
++++ b/sonix-player/tools/video-probe/fbprobe.c
+@@ -0,0 +1,166 @@
++// fbprobe -- framebuffer blit ceiling probe for the R1 / R3 Pro II.
++//
++// Measures the ABSOLUTE upper bound for on-device video playback: how fast
++// full-panel RGB565 frames can be pushed to the screen with ZERO decoding.
++//
++// If this probe cannot sustain the target frame rate with no codec in the
++// loop, then software-decoded video at that resolution/rate is impossible on
++// this hardware, because a real player must do all of this PLUS decode.
++//
++// It reproduces the player's real output path (src/main.c): a double-height
++// framebuffer, draw into the off-screen page, then FBIOPAN_DISPLAY which the
++// display driver latches on vsync.
++//
++// Three measurements, each for N seconds:
++//   1. pan-only:   flip between two already-filled pages (vsync cap of the panel)
++//   2. fill+pan:   write a fresh full-panel frame into the off-screen page,
++//                  then pan -- the true "new frame every flip" ceiling
++//   3. memfill:    just write full-panel frames to RAM, no pan -- raw CPU/mem
++//                  write bandwidth, to separate it from the vsync cap
++//
++// Build: cross-compile with the repo toolchain, must pass the glibc-2.22 ABI
++// gate (see tools/video-probe/build.sh).
++//
++// Usage on device:  ./fbprobe [seconds]   (default 3)
++
++#include <fcntl.h>
++#include <linux/fb.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <time.h>
++#include <unistd.h>
++
++static double now_s(void) {
++	struct timespec ts;
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
++}
++
++// Fill a full page with a moving gradient so the compiler cannot elide the
++// writes and so the picture visibly changes (confirms real output).
++static void fill_frame(uint16_t *dst, int w, int h, int phase) {
++	for (int y = 0; y < h; y++) {
++		uint16_t *row = dst + (size_t)y * w;
++		for (int x = 0; x < w; x++) {
++			int v = (x + y + phase);
++			// RGB565 from a cheap pattern
++			uint16_t r = (uint16_t)((v >> 1) & 0x1F);
++			uint16_t g = (uint16_t)((v >> 0) & 0x3F);
++			uint16_t b = (uint16_t)((v >> 2) & 0x1F);
++			row[x] = (uint16_t)((r << 11) | (g << 5) | b);
++		}
++	}
++}
++
++int main(int argc, char **argv) {
++	int seconds = (argc > 1) ? atoi(argv[1]) : 3;
++	if (seconds < 1)
++		seconds = 1;
++
++	int fd = open("/dev/fb0", O_RDWR);
++	if (fd < 0) {
++		perror("open /dev/fb0");
++		return 1;
++	}
++
++	struct fb_var_screeninfo var;
++	struct fb_fix_screeninfo fix;
++	if (ioctl(fd, FBIOGET_VSCREENINFO, &var) < 0 || ioctl(fd, FBIOGET_FSCREENINFO, &fix) < 0) {
++		perror("FBIOGET_*SCREENINFO");
++		close(fd);
++		return 1;
++	}
++
++	int w = var.xres, h = var.yres;
++	int bpp = var.bits_per_pixel;
++	size_t page_bytes = (size_t)fix.line_length * h;
++	size_t map_bytes = page_bytes * 2; // double buffer, as the player uses
++
++	printf("panel      : %dx%d, %d bpp, line_length=%u\n", w, h, bpp, fix.line_length);
++	printf("page bytes : %zu  (double-buffer map %zu)\n", page_bytes, map_bytes);
++	printf("pixels/frame: %d\n", w * h);
++
++	if (bpp != 16) {
++		printf("WARNING: expected 16bpp RGB565; got %d bpp. Results still indicative.\n", bpp);
++	}
++
++	uint8_t *fb = mmap(NULL, map_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++	if (fb == MAP_FAILED) {
++		// Some drivers only map one page; fall back to one page (pan-only test
++		// then just re-pans the same page, still a valid vsync measurement).
++		map_bytes = page_bytes;
++		fb = mmap(NULL, map_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++		if (fb == MAP_FAILED) {
++			perror("mmap");
++			close(fd);
++			return 1;
++		}
++		printf("NOTE: only one page could be mapped; pan test re-pans page 0.\n");
++	}
++	int two_pages = (map_bytes >= page_bytes * 2);
++
++	uint16_t *page0 = (uint16_t *)fb;
++	uint16_t *page1 = two_pages ? (uint16_t *)(fb + page_bytes) : page0;
++
++	// Pre-fill both pages for the pan-only test.
++	fill_frame(page0, w, h, 0);
++	fill_frame(page1, w, h, 128);
++
++	// ---- Test 1: pan-only (vsync cap) ----
++	{
++		double t0 = now_s(), t1;
++		long frames = 0;
++		int page = 0;
++		do {
++			var.yoffset = page ? var.yres : 0;
++			ioctl(fd, FBIOPAN_DISPLAY, &var);
++			page ^= two_pages ? 1 : 0;
++			frames++;
++			t1 = now_s();
++		} while (t1 - t0 < seconds);
++		printf("\n[1] pan-only   : %.1f fps  (%ld flips in %.2fs) -- panel vsync ceiling\n", frames / (t1 - t0), frames, t1 - t0);
++	}
++
++	// ---- Test 2: fill a fresh frame + pan (real per-frame ceiling) ----
++	{
++		double t0 = now_s(), t1;
++		long frames = 0;
++		int page = 0, phase = 0;
++		do {
++			uint16_t *dst = page ? page1 : page0;
++			fill_frame(dst, w, h, phase++);
++			var.yoffset = page ? var.yres : 0;
++			ioctl(fd, FBIOPAN_DISPLAY, &var);
++			page ^= two_pages ? 1 : 0;
++			frames++;
++			t1 = now_s();
++		} while (t1 - t0 < seconds);
++		printf("[2] fill+pan   : %.1f fps  (%ld frames in %.2fs) -- new full-panel frame every flip\n", frames / (t1 - t0), frames, t1 - t0);
++	}
++
++	// ---- Test 3: memfill only (raw write bandwidth, no pan) ----
++	{
++		double t0 = now_s(), t1;
++		long frames = 0;
++		int phase = 0;
++		do {
++			fill_frame(page0, w, h, phase++);
++			frames++;
++			t1 = now_s();
++		} while (t1 - t0 < seconds);
++		double fps = frames / (t1 - t0);
++		double mbps = fps * (double)(w * h * 2) / (1024.0 * 1024.0);
++		printf("[3] memfill    : %.1f fps  (%.1f MB/s of pixel writes) -- CPU/mem write bound\n", fps, mbps);
++	}
++
++	printf("\nTarget for full-panel video: 25-30 fps.\n");
++	printf("Read [2]: if it is below ~30, a decoder on top only makes it slower.\n");
++
++	munmap(fb, map_bytes);
++	close(fd);
++	return 0;
++}
+diff --git a/sonix-player/tools/video-probe/make-clips.sh b/sonix-player/tools/video-probe/make-clips.sh
+new file mode 100755
+index 0000000..2418a5d
+--- /dev/null
++++ b/sonix-player/tools/video-probe/make-clips.sh
+@@ -0,0 +1,124 @@
++#!/usr/bin/env bash
++# Make the test clips decprobe is run against: one 10-second source, encoded as
++# every codec worth trying at every size worth trying. Runs on the build
++# machine, not on the device.
++#
++#   tools/video-probe/make-clips.sh [source-video]
++#
++# With no argument it downloads a 10-second 720p Big Buck Bunny excerpt. Give it
++# any video of your own to test with that instead (the first 10 seconds are used).
++#
++# No ffmpeg is assumed on the machine: a small one, with x264, is built from
++# source into tools/video-probe/.build the first time. The clips land in
++# tools/video-probe/.build/clips.
++set -euo pipefail
++
++here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++
++FFMPEG_VER=9.0.2
++FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VER.tar.xz"
++X264_URL="https://code.videolan.org/videolan/x264/-/archive/stable/x264-stable.tar.bz2"
++SAMPLE_URL="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4"
++
++build="$here/.build"
++host="$build/host"
++clips="$build/clips"
++mkdir -p "$build" "$clips"
++
++# ---- a host ffmpeg, once ----
++ffmpeg="$host/bin/ffmpeg"
++if [ ! -x "$ffmpeg" ]; then
++	if [ ! -f "$host/lib/libx264.a" ]; then
++		[ -f "$build/x264-stable.tar.bz2" ] || curl -fL -o "$build/x264-stable.tar.bz2" "$X264_URL"
++		rm -rf "$build/x264-stable" && tar -C "$build" -xf "$build/x264-stable.tar.bz2"
++		(
++			cd "$build/x264-stable"
++			# --disable-asm: no nasm needed; 10-second clips do not need the speed.
++			./configure --prefix="$host" --enable-static --disable-cli --disable-asm --disable-opencl
++			make -j"$(nproc)"
++			make install
++		)
++	fi
++
++	src="$build/ffmpeg-$FFMPEG_VER"
++	if [ ! -d "$src" ]; then
++		[ -f "$build/ffmpeg-$FFMPEG_VER.tar.xz" ] || curl -fL -o "$build/ffmpeg-$FFMPEG_VER.tar.xz" "$FFMPEG_URL"
++		tar -C "$build" -xf "$build/ffmpeg-$FFMPEG_VER.tar.xz"
++	fi
++	rm -rf "$build/ffmpeg-host-obj" && mkdir -p "$build/ffmpeg-host-obj"
++	# --disable-asm, not --disable-x86asm: there is no nasm here, and with only
++	# the external assembly off FFmpeg keeps its inline MMX, which without the
++	# rest of the x86 code makes the scaler write garbage -- every clip comes
++	# out as noise, at the right size and bitrate, and nothing complains.
++	(
++		cd "$build/ffmpeg-host-obj"
++		PKG_CONFIG_PATH="$host/lib/pkgconfig" "$src/configure" \
++			--prefix="$host" --pkg-config-flags=--static \
++			--disable-everything --disable-autodetect --disable-doc --disable-ffplay --disable-ffprobe \
++			--disable-asm --disable-network --disable-debug \
++			--enable-gpl --enable-libx264 \
++			--enable-encoder=libx264,mpeg4,mpeg2video,mjpeg \
++			--enable-decoder=h264,hevc,mpeg4,mpeg2video,vp8,vp9,mjpeg \
++			--enable-demuxer=mov,matroska,avi,mpegts,mpegps \
++			--enable-muxer=matroska \
++			--enable-parser=h264,hevc,mpeg4video,mpegvideo,vp8,vp9 \
++			--enable-filter=scale,fps,format \
++			--enable-protocol=file
++		make -j"$(nproc)"
++		make install
++	)
++fi
++
++# ---- the source ----
++source_clip="${1:-}"
++if [ -z "$source_clip" ]; then
++	source_clip="$build/sample-720p.mp4"
++	[ -f "$source_clip" ] || curl -fL -o "$source_clip" "$SAMPLE_URL"
++fi
++if [ ! -f "$source_clip" ]; then
++	echo "error: no such file: $source_clip" >&2
++	exit 1
++fi
++
++# ---- the matrix ----
++# Sizes: 16:9, from what fills the 800x480 panel sideways down to a quarter of
++# it. Bitrates: what each size is usually encoded at for H.264; the two MPEG
++# codecs get half as much again, as they need it for the same picture.
++#           WxH      h264 kbit/s
++SIZES="800x450:1500 640x360:1000 480x270:600 320x180:350"
++FPS=30
++
++encode() { # name, then encoder arguments
++	local out="$clips/$1.mkv"
++	shift
++	if [ -f "$out" ]; then return; fi
++	echo "  $(basename "$out")"
++	"$ffmpeg" -hide_banner -loglevel error -y -t 10 -i "$source_clip" -an "$@" "$out"
++}
++
++echo "encoding into $clips"
++for entry in $SIZES; do
++	size="${entry%%:*}"
++	kb="${entry##*:}"
++	w="${size%x*}"
++	h="${size#*x}"
++	vf="scale=$w:$h,fps=$FPS,format=yuv420p"
++	mkb=$((kb * 3 / 2))
++
++	# H.264 Baseline: no B-frames, CAVLC. The cheapest H.264 there is to decode.
++	encode "h264-baseline-$size" -vf "$vf" -c:v libx264 -profile:v baseline -preset medium -b:v "${kb}k"
++	# H.264 High: B-frames, CABAC, 8x8 transform. What most files in the wild are.
++	encode "h264-high-$size" -vf "$vf" -c:v libx264 -profile:v high -preset medium -b:v "${kb}k"
++	# MPEG-4 ASP (the Xvid/DivX codec), with B-frames.
++	encode "mpeg4-$size" -vf "$vf" -c:v mpeg4 -bf 2 -b:v "${mkb}k"
++	# MPEG-2.
++	encode "mpeg2-$size" -vf "$vf" -c:v mpeg2video -bf 2 -b:v "${mkb}k"
++	# Motion JPEG: every frame on its own, no motion compensation at all.
++	encode "mjpeg-$size" -vf "scale=$w:$h,fps=$FPS,format=yuvj420p" -c:v mjpeg -q:v 5
++done
++
++echo ""
++ls -l "$clips"
++echo ""
++echo "Next: copy tools/video-probe/decprobe and $clips to the SD card,"
++echo "stop the player, and on the device run:  ./decprobe clips/*.mkv"
+-- 
+2.43.0
+

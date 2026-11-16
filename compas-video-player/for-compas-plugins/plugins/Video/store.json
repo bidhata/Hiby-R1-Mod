@@ -1,0 +1,6 @@
+{
+  "description": "Lists the videos in the card's Video folder under More and plays them with the Video external app. The app is installed separately, in .apps/video, from github.com/bidhata/Hiby-R1-Mod; videos must be converted for the screen first.",
+  "category": "Experimental",
+  "author": "Krish Paul",
+  "publish": true
+}

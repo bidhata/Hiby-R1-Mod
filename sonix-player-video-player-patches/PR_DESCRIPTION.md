@@ -40,3 +40,4 @@ Per-frame decode + conversion cost on the R1, from `tools/video-probe` (30 fps c
 - **Formatting:** new files were run through the repo's `.clang-format`; the edited existing files were not reformatted.
 - `tools/video-probe` (second commit) is measurement tooling, not part of the player; it can be dropped from the PR if unwanted.
 
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

@@ -1,0 +1,163 @@
+# Video
+
+Sonix Player plays videos from the `Video` folder of the card (More > Video).
+It decodes in software on a small processor and does not scale the picture, so
+a video has to be **converted for the player's screen first**, on a computer.
+This page is how.
+
+## The short version
+
+1. Install [ffmpeg](https://ffmpeg.org/download.html) on your computer.
+2. Convert the film:
+
+   ```bash
+   sonix-player/tools/video-convert.sh "My Film.mkv"
+   ```
+
+   This writes `My Film.r1.mp4` next to the original.
+3. Copy the `.mp4` into a folder called `Video` in the root of the card.
+4. On the player: More > Video, and tap the film.
+
+## What the player can play
+
+| | |
+|---|---|
+| Picture | MPEG-4 (the DivX/Xvid kind). H.264 only up to about 480x270 |
+| Size | no larger than the screen held sideways: **800x480** on the R1, **720x480** on the R3 Pro II |
+| Frame rate | up to 25 frames a second at full size |
+| Sound | AAC, MP3, MP2 or AC-3, stereo |
+| Container | `.mp4`, `.m4v`, `.mkv`, `.avi`, `.mov` |
+
+A file larger than the screen is refused with a message rather than played
+badly. HEVC (x265), VP9 and AV1 are not supported at any size.
+
+A film that came as a 720p or 1080p download will not play as it is. It needs
+converting, which also makes it much smaller.
+
+## Installing ffmpeg
+
+| System | Command |
+|---|---|
+| Windows | `winget install Gyan.FFmpeg`, then open a new terminal |
+| Ubuntu, Debian, WSL | `sudo apt install ffmpeg` |
+| macOS | `brew install ffmpeg` |
+
+Check it with `ffmpeg -version`.
+
+## Converting with the script
+
+`video-convert.sh` is a bash script. On Linux and macOS run it from a
+terminal. On Windows run it from WSL or Git Bash, or use the plain ffmpeg
+command further down, which needs neither.
+
+```bash
+sonix-player/tools/video-convert.sh [options] input [input ...]
+```
+
+| Option | What it does | Default |
+|---|---|---|
+| `-d r1` or `-d r3` | which player: `r1` is 800x480, `r3` is the R3 Pro II's 720x480 | `r1` |
+| `-o dir` | where the results go | next to each input |
+| `-a n` | which sound track to keep, counting from 0 | `0` |
+| `-b kbit` | picture bitrate | `1800` |
+| `-r fps` | most frames a second to keep | `25` |
+| `-s hh:mm:ss` | start here instead of at the beginning | |
+| `-t seconds` | stop after this long | |
+
+The result is named after the input with the player in it: `Film.r1.mp4` or
+`Film.r3.mp4`.
+
+### Examples
+
+A whole folder, straight onto the card (here mounted as `E:` and seen from WSL):
+
+```bash
+sonix-player/tools/video-convert.sh -o /mnt/e/Video /mnt/d/Movies/*.mkv
+```
+
+A film with two languages, keeping the second sound track:
+
+```bash
+sonix-player/tools/video-convert.sh -a 1 "Film.mkv"
+```
+
+Trying the settings on one minute from the middle before converting two hours:
+
+```bash
+sonix-player/tools/video-convert.sh -s 00:30:00 -t 60 "Film.mkv"
+```
+
+For the R3 Pro II:
+
+```bash
+sonix-player/tools/video-convert.sh -d r3 "Film.mkv"
+```
+
+## Converting without the script
+
+The script only runs ffmpeg. This is the same command, for the R1, in one
+line. It works as it is in Windows Command Prompt, PowerShell, and any shell:
+
+```
+ffmpeg -i "Film.mkv" -map 0:v:0 -map 0:a:0? -sn -dn -vf "scale='trunc(iw*sar/2)*2':ih,setsar=1,scale='min(800,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p" -fpsmax 25 -c:v mpeg4 -vtag mp4v -bf 2 -g 50 -b:v 1800k -maxrate 3600k -bufsize 3600k -c:a aac -b:a 128k -ac 2 -ar 44100 -movflags +faststart "Film.r1.mp4"
+```
+
+For the R3 Pro II change `min(800,iw)` to `min(720,iw)`.
+
+## How big the files are
+
+At the default settings a film is about **870 MB an hour** (1800 kbit/s of
+picture and 128 kbit/s of sound). `-b 1200` brings that to about 600 MB an
+hour, with a softer picture in fast scenes.
+
+## Why these settings
+
+They come from measurements on the R1 itself (`sonix-player/tools/video-probe`).
+
+- **MPEG-4 and not H.264.** The player decodes a full-size MPEG-4 frame in
+  about 15 ms and an H.264 one in about 50 ms. At 25 frames a second there are
+  40 ms for a frame, and it still has to be converted and drawn.
+- **25 frames a second.** A full-size frame takes about 29 ms to decode and
+  convert. That fits 25 a second and does not fit 30. A film is 24 or 25
+  anyway. For a smaller picture `-r 30` is fine.
+- **Two B-frames.** When the player falls behind it drops those first, and the
+  picture stays whole.
+- **A key frame every two seconds.** Skipping forward and back lands on key
+  frames.
+- **Stereo AAC at 44.1 kHz.** The player decodes it without floating point.
+- **No larger than the screen.** The player does not scale: a picture is shown
+  pixel for pixel, turned a quarter turn when it is wider than tall.
+
+## Using the player
+
+- Tap the picture for the controls: pause, back and forward ten seconds, and
+  close. They go away by themselves after three seconds.
+- The play/pause key pauses, and the next and previous keys skip ten seconds.
+- A film that is closed part way through carries on from there the next time.
+  One that is left in its first half minute, or in its last twentieth, starts
+  from the beginning.
+- The screen stays on while a film plays. Switching it off pauses the film.
+
+## When something does not work
+
+| What the player says | What to do |
+|---|---|
+| No videos. Put them in the Video folder... | The folder must be called `Video` and sit in the root of the card |
+| This video is larger than the screen | Convert it. With the script, check that `-d` matches your player |
+| This kind of video is not supported | The picture is in a codec the player does not have (HEVC, VP9, AV1). Convert it |
+| This file cannot be opened | The copy to the card may be incomplete. Copy it again |
+
+**The picture stutters.** Convert at the defaults if you changed them, in
+particular `-r 25`. A picture at full size and 30 frames a second is more than
+the player can do.
+
+**Over Bluetooth.** The headphones' audio encoder takes part of the same
+processor. Full-size video at 25 frames a second was tested on the R1 with AAC
+headphones and holds. If yours stutters, convert at a lower bitrate
+(`-b 1200`), which is less work to decode.
+
+**No subtitles.** The player does not show subtitle tracks. A film whose
+subtitles are part of the picture shows them like any other part of it.
+
+**No sound on a film with several sound tracks.** The first track may be one
+the film does not use. Try `-a 1`.

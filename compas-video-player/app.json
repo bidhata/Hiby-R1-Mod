@@ -1,0 +1,9 @@
+{
+  "protocol": 1,
+  "id": "video",
+  "name": "Video",
+  "version": "0.1",
+  "exec": "video",
+  "opens": ["mp4", "m4v", "mkv", "avi", "mov"],
+  "free_player_memory": true
+}

@@ -1,0 +1,151 @@
+From 0b7530ec423781486376885ac04f10964d092d39 Mon Sep 17 00:00:00 2001
+From: Krish Paul <me@krishnendu.com>
+Date: Tue, 17 Nov 2026 04:14:33 +0800
+Subject: [PATCH] Video: list the card's videos and play them with the Video
+ external app
+
+A row under More (Additional Tools on players without ui.more_menu)
+that lists the mp4, m4v, mkv, avi and mov files in <card>/Video and
+hands the one tapped to the external app with id "video" through
+plugin.launch_app. The plugin plays nothing itself: the app, a static
+MIPS program in .apps/video, does the decoding. It is 3.5 MB, over the
+store's 1 MiB limit for a file, so it is installed by hand from
+https://github.com/bidhata/Hiby-R1-Mod (GPL-3.0-or-later, source there).
+
+Says so in a list row when the player cannot launch apps, when the app
+is not installed, and when the folder holds no videos.
+
+Tested on a HiBy R1 with CompasOS v1.5.1. Not run through
+tools/build_index.py --check: no Lua 5.5 on the machine it was written
+on.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ plugins/Video/Video.lua  | 101 +++++++++++++++++++++++++++++++++++++++
+ plugins/Video/store.json |   6 +++
+ 2 files changed, 107 insertions(+)
+ create mode 100644 plugins/Video/Video.lua
+ create mode 100644 plugins/Video/store.json
+
+diff --git a/plugins/Video/Video.lua b/plugins/Video/Video.lua
+new file mode 100644
+index 0000000..0d27f45
+--- /dev/null
++++ b/plugins/Video/Video.lua
+@@ -0,0 +1,101 @@
++-- Video: the card's Video folder, in the player's own lists.
++--
++-- A plugin cannot decode a film -- it is Lua, and the decoding takes all of
++-- the processor in C -- so the playing is done by the Video external app
++-- (<card>/.apps/video). This is its front door: the list is drawn by the
++-- player, in the player's fonts and theme, with names in any script, and a
++-- tap hands the file to the app. When the film ends or is closed the app
++-- exits and this list is back.
++--
++-- Install: copy this file to <card>/.plugins/Video.lua, then
++-- Settings > System > Plugins > Refresh Plugins. The row is under More.
++--
++-- The app, its source and how to convert a film for this screen:
++-- https://github.com/bidhata/Hiby-R1-Mod
++
++plugin.define({
++    id = "org.krishnendu.video",
++    name = "Video",
++    version = "0.1.1",
++    api_min = 14,
++})
++
++local APP_ID = "video"
++local FOLDER = "Video"
++
++-- What the app's manifest lists under "opens". A file with another extension
++-- would be refused by plugin.launch_app, so it is not shown at all.
++local EXTENSIONS = { mp4 = true, m4v = true, mkv = true, avi = true, mov = true }
++
++local function can(capability)
++    return plugin.has_capability ~= nil and plugin.has_capability(capability)
++end
++
++local function note(text)
++    plugin.show_list("Video", { { label = text, wrap = true } }, function() end)
++end
++
++local function app_installed()
++    if not can("apps.list") then
++        return true -- cannot tell; launch_app will say
++    end
++    for _, app in ipairs(plugin.list_apps()) do
++        if app.id == APP_ID then
++            return true
++        end
++    end
++    return false
++end
++
++local function videos(dir)
++    local names = {}
++    for _, entry in ipairs(plugin.list_dir(dir)) do
++        local ext = entry.name:match("%.([^.]+)$")
++        if not entry.dir and ext and EXTENSIONS[ext:lower()] then
++            names[#names + 1] = entry.name
++        end
++    end
++    table.sort(names, function(a, b) return a:lower() < b:lower() end)
++    return names
++end
++
++local function open()
++    if not can("apps.launch") then
++        note("This version of the player cannot start external apps. Update the player.")
++        return
++    end
++    if not app_installed() then
++        note("The Video app is not installed. Download it from github.com/bidhata/Hiby-R1-Mod " ..
++             "and copy its video folder to .apps on the card.")
++        return
++    end
++
++    local dir = plugin.sd_root() .. "/" .. FOLDER
++    local names = videos(dir)
++    if #names == 0 then
++        note("No videos. Put them in the Video folder on the card, converted for this screen: " ..
++             "see github.com/bidhata/Hiby-R1-Mod for how.")
++        return
++    end
++
++    local rows = {}
++    for i, name in ipairs(names) do
++        -- Without the extension: every row would end in the same four letters.
++        rows[i] = { label = name:gsub("%.[^.]+$", ""), wrap = true }
++    end
++
++    plugin.show_list("Video", rows, function(index)
++        local ok, reason = plugin.launch_app(APP_ID, dir .. "/" .. names[index])
++        if not ok then
++            plugin.show_toast("Video did not start: " .. tostring(reason))
++        end
++    end)
++end
++
++-- Under More, next to External Apps, where the player has room for it; in
++-- Additional Tools on a player that does not take rows there.
++if can("ui.more_menu") then
++    plugin.register_list_item("more", "Video", open)
++else
++    plugin.register_list_item("settings", "Video", open)
++end
+diff --git a/plugins/Video/store.json b/plugins/Video/store.json
+new file mode 100644
+index 0000000..b28665c
+--- /dev/null
++++ b/plugins/Video/store.json
+@@ -0,0 +1,6 @@
++{
++  "description": "Lists the videos in the card's Video folder under More and plays them with the Video external app. The app is installed separately, in .apps/video, from github.com/bidhata/Hiby-R1-Mod; videos must be converted for the screen first.",
++  "category": "Experimental",
++  "author": "Krish Paul",
++  "publish": true
++}
+-- 
+2.43.0
+

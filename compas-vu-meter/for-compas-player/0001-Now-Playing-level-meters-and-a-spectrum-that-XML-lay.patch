@@ -1,0 +1,924 @@
+From 6038d8b9f7b0429de21fa03b6e5b5d3ca52356f5 Mon Sep 17 00:00:00 2001
+From: Krish Paul <me@krishnendu.com>
+Date: Wed, 18 Nov 2026 04:55:58 +0800
+Subject: [PATCH] Now Playing: level meters and a spectrum that XML layouts can
+ show
+
+A layout opts in by naming widgets: vu_left and vu_right for the level
+and vu_peak_left and vu_peak_right for a held peak, each an lv_bar or,
+for a round dial, an lv_arc; vu_needle_left and vu_needle_right for any
+object to be turned with the level like a needle; vu_band_1 to
+vu_band_10, with vu_band_peak_ caps, for a spectrum in ten octave bands;
+and optionally an object named vu_meter around them so the group leaves
+with the controls while the lyrics are open. The player sets the values
+on the existing 50 ms player tick; no Lua runs per frame.
+
+The levels are measured where PCM leaves for the output
+(audio_output_write, audio_output_write_s24, and the SDL sink on the
+host), in short blocks stamped with the time they are heard, so the meter
+moves with the sound and not a buffer ahead of it. Local output uses the
+ALSA buffer size; the aplay pipe targets use what waits in the pipe plus
+an estimate for aplay's buffer and the Bluetooth link. DoP frames are
+skipped. Nothing is measured unless a meter asked within the last second,
+and the spectrum's ten band-pass filters run only for a layout that
+names a band.
+
+New capability token: ui.player_layout_meter.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ Makefile                                      |   1 +
+ src/audio/engine/audio_output_sink.c          |   8 +
+ src/audio/output/audio_output.c               |  42 +++
+ src/audio/visualization/level_meter.c         | 201 ++++++++++++
+ src/audio/visualization/level_meter.h         |  59 ++++
+ .../bindings/ui/plugin_info_bindings.c        |   3 +-
+ src/ui/application/gui_control_poll.c         |   1 +
+ src/ui/player/meter/player_vu_meter.c         | 293 ++++++++++++++++++
+ src/ui/player/meter/player_vu_meter.h         |  63 ++++
+ src/ui/player/screen/gui_player.c             |  24 ++
+ src/ui/player/screen/gui_player.h             |   2 +
+ 11 files changed, 696 insertions(+), 1 deletion(-)
+ create mode 100644 src/audio/visualization/level_meter.c
+ create mode 100644 src/audio/visualization/level_meter.h
+ create mode 100644 src/ui/player/meter/player_vu_meter.c
+ create mode 100644 src/ui/player/meter/player_vu_meter.h
+
+diff --git a/Makefile b/Makefile
+index 2e687c7..4ff995f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -827,6 +827,7 @@ APP_SRCS += src/ui/text/i18n/i18n.c src/ui/text/i18n/i18n_catalog.c $(wildcard s
+ APP_SRCS += src/ui/player/layout/player_layouts.c src/ui/player/layout/player_layout_builtin.c
+ APP_SRCS += src/ui/player/transport/player_volume_popup.c src/ui/player/transport/player_transport_images.c src/ui/player/artwork/player_artwork_pixels.c
+ APP_SRCS += src/ui/player/transport/player_seekbar.c src/audio/visualization/waveform.c
++APP_SRCS += src/ui/player/meter/player_vu_meter.c src/audio/visualization/level_meter.c
+ APP_SRCS += src/ui/player/artwork/player_cover_fade.c src/ui/player/artwork/player_backdrop.c src/ui/player/artwork/player_cover.c src/ui/player/artwork/player_lyrics_backdrop.c src/ui/player/lyrics/player_timeline_labels.c
+ APP_SRCS += src/network/bluetooth/control/bt_ssc_policy.c src/core/persistence/bt_ssc_settings.c src/network/bluetooth/control/bt_rc_trust.c src/core/persistence/bt_rc_trust_settings.c
+ APP_SRCS += src/network/bluetooth/reconnect/bluetooth_reconnect.c src/network/bluetooth/media/bt_cover_art.c
+diff --git a/src/audio/engine/audio_output_sink.c b/src/audio/engine/audio_output_sink.c
+index 2110dc2..7d5c8b1 100644
+--- a/src/audio/engine/audio_output_sink.c
++++ b/src/audio/engine/audio_output_sink.c
+@@ -8,6 +8,7 @@
+ #include "../decoders/ogg/ogg_probe.h"
+ #include "../effects/peq.h"
+ #include "../timing/audio_tempo.h"
++#include "../visualization/level_meter.h"
+ #include "../../network/http/stream/http_stream_file.h"
+ #include "../../library/remote/remote_track.h"
+ #include "../../library/metadata/parsing/metadata.h"
+@@ -94,6 +95,13 @@ bool ensure_device(unsigned int channels, unsigned int sample_rate) {
+ 
+ void write_device(const int16_t * buf, uint64_t frames, unsigned int channels) {
+     SDL_QueueAudio(sdl_dev, buf, (Uint32) (frames * channels * sizeof(int16_t)));
++    /* Level meter tap: this chunk is heard once everything queued ahead of
++     * it has played. */
++    if (level_meter_wanted() && device_sample_rate) {
++        uint64_t queued_frames = SDL_GetQueuedAudioSize(sdl_dev) / (channels * sizeof(int16_t));
++        level_meter_feed_s16(buf, (size_t) frames, channels, device_sample_rate,
++                             (unsigned) (queued_frames * 1000u / device_sample_rate));
++    }
+ 
+     /* Throttle so the decode loop doesn't race ahead and queue the whole file at once */
+     Uint32 max_queued_bytes = device_sample_rate * channels * sizeof(int16_t);
+diff --git a/src/audio/output/audio_output.c b/src/audio/output/audio_output.c
+index ec4554f..fc2e536 100644
+--- a/src/audio/output/audio_output.c
++++ b/src/audio/output/audio_output.c
+@@ -1,6 +1,7 @@
+ #include "audio_output.h"
+ #include "usb_dsd_output.h"
+ #include "../effects/peq.h"
++#include "../visualization/level_meter.h"
+ #include "../../core/system/logging/debug_log.h"
+ #include "../../core/process/subprocess.h"
+ #include "../../hardware/device/headphone_status.h"
+@@ -17,6 +18,7 @@
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <poll.h>
++#include <sys/ioctl.h>
+ #include <time.h>
+ 
+ #include <tinyalsa/asoundlib.h>
+@@ -734,6 +736,42 @@ static bool write_pipe_bounded(int fd, const char * p, size_t remaining, size_t
+     return true;
+ }
+ 
++/* Level meter tap (level_meter.h): how long after a write returns its last
++ * frame is heard, so the meter can move with the sound.
++ *
++ * Local output is exact: writes block on a full ALSA buffer, so the frame
++ * just written sits one buffer length from the DAC. The pipe targets are an
++ * estimate: what is still waiting in the pipe is read from the kernel, aplay
++ * keeps its own buffer full behind that (its default, half a second), and a
++ * Bluetooth link adds about a quarter of a second of its own, which is what
++ * BlueALSA reports for the A2DP links tried. A meter that is 50 ms out is not
++ * seen; one that is a second early is. */
++#define METER_APLAY_BUFFER_MS 500
++#define METER_BT_LINK_MS 250
++
++static unsigned meter_latency_ms(int pipe_fd, size_t frame_bytes) {
++    unsigned rate = device_sample_rate ? device_sample_rate : 44100;
++    if (pipe_fd < 0)
++        return alsa_pcm ? (unsigned) ((uint64_t) pcm_get_buffer_size(alsa_pcm) * 1000u / rate) : 0;
++    int waiting = 0;
++    if (ioctl(pipe_fd, FIONREAD, &waiting) != 0 || waiting < 0) waiting = 0;
++    unsigned ms = (unsigned) ((uint64_t) waiting * 1000u / (rate * frame_bytes)) + METER_APLAY_BUFFER_MS;
++    return active_target == OUTPUT_TARGET_BT ? ms + METER_BT_LINK_MS : ms;
++}
++
++static void meter_feed_s16(const int16_t * buf, uint64_t frames, unsigned int channels, int pipe_fd) {
++    if (!level_meter_wanted()) return;
++    level_meter_feed_s16(buf, (size_t) frames, channels, device_sample_rate,
++                         meter_latency_ms(pipe_fd, channels * sizeof(int16_t)));
++}
++
++/* DoP frames are DSD bits under a marker byte, not samples: no level to read. */
++static void meter_feed_s24(const int32_t * buf, uint64_t frames, unsigned int channels, int pipe_fd) {
++    if (active_dop || !level_meter_wanted()) return;
++    level_meter_feed_s24(buf, (size_t) frames, channels, device_sample_rate,
++                         meter_latency_ms(pipe_fd, channels * sizeof(int32_t)));
++}
++
+ bool audio_output_write(const int16_t * buf, uint64_t frames, unsigned int channels, uint64_t * out_frames_written) {
+     if (out_frames_written) *out_frames_written = 0;
+     if (!caller_owns_output()) return false;
+@@ -796,6 +834,7 @@ bool audio_output_write(const int16_t * buf, uint64_t frames, unsigned int chann
+             }
+             return false;
+         }
++        meter_feed_s16(buf, frames, channels, fd);
+         if (out_frames_written) *out_frames_written = frames;
+         return true;
+     }
+@@ -813,6 +852,7 @@ bool audio_output_write(const int16_t * buf, uint64_t frames, unsigned int chann
+                     ret < 0 ? pcm_get_error(alsa_pcm) : "short write");
+             return false;
+         }
++        meter_feed_s16(buf, frames, channels, -1);
+         if (out_frames_written) *out_frames_written = frames;
+         return true;
+     }
+@@ -874,6 +914,7 @@ bool audio_output_write_s24(const int32_t * buf, uint64_t frames, unsigned int c
+             }
+             return false;
+         }
++        meter_feed_s24(buf, frames, channels, fd);
+         if (out_frames_written) *out_frames_written = frames;
+         return true;
+     }
+@@ -891,6 +932,7 @@ bool audio_output_write_s24(const int32_t * buf, uint64_t frames, unsigned int c
+                     ret < 0 ? pcm_get_error(alsa_pcm) : "short write");
+             return false;
+         }
++        meter_feed_s24(buf, frames, channels, -1);
+         if (out_frames_written) *out_frames_written = frames;
+         return true;
+     }
+diff --git a/src/audio/visualization/level_meter.c b/src/audio/visualization/level_meter.c
+new file mode 100644
+index 0000000..baea8e6
+--- /dev/null
++++ b/src/audio/visualization/level_meter.c
+@@ -0,0 +1,201 @@
++#include "level_meter.h"
++
++#include <math.h>
++#include <stdatomic.h>
++#include <string.h>
++#include <time.h>
++
++/* One block is about 10 ms of sound: short enough that a 50 ms UI tick sees
++ * several, long enough that the ring spans the deepest output path (a pipe
++ * into aplay into a Bluetooth link, about a second) with room to spare. */
++#define BLOCK_MS 10
++#define RING_BLOCKS 256 /* power of two; 2.5 s of blocks */
++#define REQUEST_HOLD_MS 1000
++
++/* Above 48 kHz every Nth frame is measured. The meter shows loudness, and a
++ * 192 kHz stream does not need 384000 multiplies a second to say how loud. */
++#define FULL_RATE_LIMIT 48000
++
++typedef struct {
++    uint32_t due_ms;     /* monotonic ms at which the block's last frame is heard */
++    uint32_t peak[2];    /* largest |sample|, 16-bit scale */
++    uint32_t mean_sq[2]; /* mean of sample^2, 16-bit scale (fits: 32768^2 = 2^30) */
++    float band_sq[LEVEL_METER_BANDS]; /* mean of the band-passed mono mix squared, 0..1 */
++} level_block_t;
++
++const float level_meter_band_hz[LEVEL_METER_BANDS] = {
++    31.25f, 62.5f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f,
++};
++
++/* One band-pass per band (RBJ, unity gain at the centre, an octave wide), in
++ * transposed direct form II. Touched by the feeding thread only. */
++#define BAND_Q 1.414f
++typedef struct {
++    float b0, a1, a2; /* b1 is 0 and b2 is -b0 */
++    float z1, z2;
++    bool live;        /* false when the centre is too close to Nyquist */
++} band_filter_t;
++static band_filter_t bands[LEVEL_METER_BANDS];
++static unsigned bands_rate; /* the filtered rate the coefficients are for */
++
++static void bands_design(unsigned rate) {
++    for (int i = 0; i < LEVEL_METER_BANDS; i++) {
++        band_filter_t * f = &bands[i];
++        memset(f, 0, sizeof(*f));
++        if (level_meter_band_hz[i] > 0.45f * (float) rate) continue;
++        float w0 = 2.0f * 3.14159265f * level_meter_band_hz[i] / (float) rate;
++        float alpha = sinf(w0) / (2.0f * BAND_Q);
++        float a0 = 1.0f + alpha;
++        f->b0 = alpha / a0;
++        f->a1 = -2.0f * cosf(w0) / a0;
++        f->a2 = (1.0f - alpha) / a0;
++        f->live = true;
++    }
++    bands_rate = rate;
++}
++
++static level_block_t ring[RING_BLOCKS];
++/* head is written by the feeder only, tail by the reader only. */
++static atomic_uint ring_head;
++static atomic_uint ring_tail;
++static atomic_uint wanted_until_ms;
++static atomic_uint spectrum_until_ms;
++static atomic_bool wanted_ever;
++
++static uint32_t now_ms(void) {
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return (uint32_t) ((uint64_t) ts.tv_sec * 1000u + (uint64_t) ts.tv_nsec / 1000000u);
++}
++
++void level_meter_request(bool spectrum) {
++    uint32_t until = now_ms() + REQUEST_HOLD_MS;
++    atomic_store_explicit(&wanted_until_ms, until, memory_order_relaxed);
++    if (spectrum) atomic_store_explicit(&spectrum_until_ms, until, memory_order_relaxed);
++    atomic_store_explicit(&wanted_ever, true, memory_order_relaxed);
++}
++
++static bool spectrum_wanted(void) {
++    return (int32_t) (atomic_load_explicit(&spectrum_until_ms, memory_order_relaxed) - now_ms()) > 0;
++}
++
++bool level_meter_wanted(void) {
++    if (!atomic_load_explicit(&wanted_ever, memory_order_relaxed)) return false;
++    /* Signed difference, so the comparison survives the counter wrapping. */
++    return (int32_t) (atomic_load_explicit(&wanted_until_ms, memory_order_relaxed) - now_ms()) > 0;
++}
++
++static void push_block(const level_block_t * block) {
++    unsigned head = atomic_load_explicit(&ring_head, memory_order_relaxed);
++    unsigned tail = atomic_load_explicit(&ring_tail, memory_order_acquire);
++    /* Full: the reader stopped reading. Drop the new block rather than move
++     * the reader's index from this thread. */
++    if (head - tail >= RING_BLOCKS) return;
++    ring[head & (RING_BLOCKS - 1)] = *block;
++    atomic_store_explicit(&ring_head, head + 1, memory_order_release);
++}
++
++/* shift brings a sample to the 16-bit scale: 0 for S16, 8 for S24. */
++#define FEED_BODY(sample_t, shift)                                                         \
++    if (!buf || !frames || !channels || !sample_rate) return;                              \
++    unsigned stride = sample_rate > FULL_RATE_LIMIT ? (sample_rate + 22050) / 44100 : 1;   \
++    size_t block_frames = (size_t) sample_rate * BLOCK_MS / 1000;                          \
++    if (block_frames < stride) block_frames = stride;                                      \
++    unsigned right = channels > 1 ? 1 : 0;                                                 \
++    uint32_t end_ms = now_ms() + latency_ms;                                               \
++    bool spectrum = spectrum_wanted();                                                     \
++    if (spectrum && bands_rate != sample_rate / stride) bands_design(sample_rate / stride); \
++    for (size_t start = 0; start < frames; start += block_frames) {                        \
++        size_t stop = start + block_frames < frames ? start + block_frames : frames;       \
++        uint32_t peak_l = 0, peak_r = 0, count = 0;                                        \
++        uint64_t sum_l = 0, sum_r = 0;                                                     \
++        float band_sum[LEVEL_METER_BANDS] = { 0 };                                         \
++        for (size_t f = start; f < stop; f += stride) {                                    \
++            const sample_t * frame = buf + f * channels;                                   \
++            int32_t l = (int32_t) frame[0] >> (shift);                                     \
++            int32_t r = (int32_t) frame[right] >> (shift);                                 \
++            uint32_t al = (uint32_t) (l < 0 ? -l : l);                                     \
++            uint32_t ar = (uint32_t) (r < 0 ? -r : r);                                     \
++            /* A word wider than its format claims must not overflow the sum. */           \
++            if (al > 32768u) al = 32768u;                                                  \
++            if (ar > 32768u) ar = 32768u;                                                  \
++            if (al > peak_l) peak_l = al;                                                  \
++            if (ar > peak_r) peak_r = ar;                                                  \
++            sum_l += (uint64_t) al * al;                                                   \
++            sum_r += (uint64_t) ar * ar;                                                   \
++            count++;                                                                       \
++            if (spectrum) {                                                                \
++                float x = (float) (l + r) * (1.0f / 65536.0f);                             \
++                for (int b = 0; b < LEVEL_METER_BANDS; b++) {                              \
++                    band_filter_t * bf = &bands[b];                                        \
++                    if (!bf->live) continue;                                               \
++                    float y = bf->b0 * x + bf->z1;                                         \
++                    bf->z1 = bf->z2 - bf->a1 * y;                                          \
++                    bf->z2 = -bf->b0 * x - bf->a2 * y;                                     \
++                    band_sum[b] += y * y;                                                  \
++                }                                                                          \
++            }                                                                              \
++        }                                                                                  \
++        if (!count) continue;                                                              \
++        level_block_t block = {                                                            \
++            .due_ms = end_ms - (uint32_t) ((uint64_t) (frames - stop) * 1000u / sample_rate), \
++            .peak = { peak_l, peak_r },                                                    \
++            .mean_sq = { (uint32_t) (sum_l / count), (uint32_t) (sum_r / count) },         \
++        };                                                                                 \
++        if (spectrum) {                                                                    \
++            for (int b = 0; b < LEVEL_METER_BANDS; b++) {                                  \
++                block.band_sq[b] = band_sum[b] / (float) count;                            \
++                /* A filter ringing down into denormals would cost a kernel trap per      \
++                 * operation on this FPU: stop it at silence instead. */                   \
++                if (fabsf(bands[b].z1) < 1e-15f) bands[b].z1 = 0.0f;                       \
++                if (fabsf(bands[b].z2) < 1e-15f) bands[b].z2 = 0.0f;                       \
++            }                                                                              \
++        }                                                                                  \
++        push_block(&block);                                                                \
++    }
++
++void level_meter_feed_s16(const int16_t * buf, size_t frames, unsigned channels,
++                          unsigned sample_rate, unsigned latency_ms) {
++    FEED_BODY(int16_t, 0)
++}
++
++void level_meter_feed_s24(const int32_t * buf, size_t frames, unsigned channels,
++                          unsigned sample_rate, unsigned latency_ms) {
++    FEED_BODY(int32_t, 8)
++}
++
++bool level_meter_read(level_meter_levels_t * out) {
++    memset(out, 0, sizeof(*out));
++    unsigned tail = atomic_load_explicit(&ring_tail, memory_order_relaxed);
++    unsigned head = atomic_load_explicit(&ring_head, memory_order_acquire);
++    uint32_t now = now_ms();
++
++    uint64_t sum[2] = { 0, 0 };
++    uint32_t peak[2] = { 0, 0 };
++    float band[LEVEL_METER_BANDS] = { 0 };
++    unsigned taken = 0;
++    while (tail != head) {
++        const level_block_t * block = &ring[tail & (RING_BLOCKS - 1)];
++        int32_t late_ms = (int32_t) (now - block->due_ms);
++        if (late_ms < 0) break; /* not heard yet */
++        tail++;
++        /* Heard long ago (the meter was not being read): not what is
++         * sounding now, so it does not count. */
++        if (late_ms > 250) continue;
++        for (int c = 0; c < 2; c++) {
++            sum[c] += block->mean_sq[c];
++            if (block->peak[c] > peak[c]) peak[c] = block->peak[c];
++        }
++        for (int b = 0; b < LEVEL_METER_BANDS; b++) band[b] += block->band_sq[b];
++        taken++;
++    }
++    atomic_store_explicit(&ring_tail, tail, memory_order_release);
++    if (!taken) return false;
++
++    for (int c = 0; c < 2; c++) {
++        out->mean_square[c] = (float) (sum[c] / taken) / (32768.0f * 32768.0f);
++        out->peak[c] = (float) peak[c] / 32768.0f;
++    }
++    for (int b = 0; b < LEVEL_METER_BANDS; b++) out->band_mean_square[b] = band[b] / (float) taken;
++    return true;
++}
+diff --git a/src/audio/visualization/level_meter.h b/src/audio/visualization/level_meter.h
+new file mode 100644
+index 0000000..a623b1b
+--- /dev/null
++++ b/src/audio/visualization/level_meter.h
+@@ -0,0 +1,59 @@
++#ifndef LEVEL_METER_H
++#define LEVEL_METER_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++/* Stereo level tap for the Now Playing level meter (roles vu_left, vu_right,
++ * vu_peak_left, vu_peak_right; see player_vu_meter.h).
++ *
++ * The output owner thread feeds every PCM chunk it has just delivered; the UI
++ * thread reads the levels of the audio that is being heard now. The two meet
++ * in a lock-free single-producer, single-consumer ring of short blocks, each
++ * stamped with the time it leaves the output buffer, so the meter moves with
++ * the sound rather than a buffer's length ahead of it.
++ *
++ * Nothing is measured unless a meter asked within the last second
++ * (level_meter_request()): a layout without a meter, a dark screen or another
++ * screen in front costs the audio thread one atomic load and one clock read
++ * per chunk. */
++
++/* The spectrum: ten bands an octave apart. */
++#define LEVEL_METER_BANDS 10
++extern const float level_meter_band_hz[LEVEL_METER_BANDS]; /* 31.25 Hz ... 16 kHz */
++
++typedef struct {
++    /* Mean square of the samples heard since the previous read, 0..1 against
++     * full scale, per channel. Mono sources report the same value twice. */
++    float mean_square[2];
++    /* Largest absolute sample in the same span, 0..1 against full scale. */
++    float peak[2];
++    /* Mean square of the mono mix in each band over the same span, 0..1.
++     * All zero unless the spectrum was asked for. */
++    float band_mean_square[LEVEL_METER_BANDS];
++} level_meter_levels_t;
++
++/* UI thread: keep the tap measuring for about another second. The spectrum
++ * costs the audio thread ten band-pass filters per sample, so it is only run
++ * while a layout that shows it asks with spectrum = true. */
++void level_meter_request(bool spectrum);
++
++/* Output owner thread: true while a meter is asking. Check before feeding. */
++bool level_meter_wanted(void);
++
++/* Output owner thread: frames just delivered to the output, interleaved.
++ * latency_ms is how long after this call returns the LAST frame is heard.
++ * The s24 form takes samples right-justified in 32 bits (PCM_FORMAT_S24_LE),
++ * as audio_output_write_s24() does. Never feed DSD carrier words. */
++void level_meter_feed_s16(const int16_t * buf, size_t frames, unsigned channels,
++                          unsigned sample_rate, unsigned latency_ms);
++void level_meter_feed_s24(const int32_t * buf, size_t frames, unsigned channels,
++                          unsigned sample_rate, unsigned latency_ms);
++
++/* UI thread: levels of everything that became audible since the last call.
++ * Returns false, with out zeroed, when nothing did (paused, stopped, a
++ * source that is not PCM). */
++bool level_meter_read(level_meter_levels_t * out);
++
++#endif
+diff --git a/src/plugins/bindings/ui/plugin_info_bindings.c b/src/plugins/bindings/ui/plugin_info_bindings.c
+index cf270ff..eac962b 100644
+--- a/src/plugins/bindings/ui/plugin_info_bindings.c
++++ b/src/plugins/bindings/ui/plugin_info_bindings.c
+@@ -37,7 +37,8 @@ static const char * const plugin_capabilities[] = {
+     "ui.settings_list_10_sliders", "ui.button_lock", "playback.lyrics_refresh",
+     "audio.loop", "ui.breeze_stream_icons", "ui.list_hold", "ui.menu", "ui.text_view_style", "ui.text_view_replace",
+     "apps.list", "apps.launch",
+-    "network.status", "i18n.tr"
++    "network.status", "i18n.tr",
++    "ui.player_layout_meter"
+ };
+ 
+ int l_plugin_has_capability(lua_State * L) {
+diff --git a/src/ui/application/gui_control_poll.c b/src/ui/application/gui_control_poll.c
+index 10ed4b4..cdd4881 100644
+--- a/src/ui/application/gui_control_poll.c
++++ b/src/ui/application/gui_control_poll.c
+@@ -184,6 +184,7 @@ static void player_ui_timer_cb(lv_timer_t * timer) {
+     if (gui_player_sync_popup_pause()) return;
+     if (!backlight_screen_is_on()) return;
+     if (gui_navigation_transition_in_progress() || gui_player_lyrics_animation_in_progress()) return;
++    gui_player_update_vu_meter();
+     if (!gui_player_has_active_track() || gui_player_is_seeking()) return;
+ 
+     gui_player_update_progress();
+diff --git a/src/ui/player/meter/player_vu_meter.c b/src/ui/player/meter/player_vu_meter.c
+new file mode 100644
+index 0000000..9fdbe9f
+--- /dev/null
++++ b/src/ui/player/meter/player_vu_meter.c
+@@ -0,0 +1,293 @@
++#include "player_vu_meter.h"
++
++#include "../../../audio/visualization/level_meter.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++
++#define METER_RANGE 1000   /* bar units from empty to full */
++#define FLOOR_DB (-48.0f)  /* the empty end of the scale */
++/* RMS is shown 3 dB up, the usual convention for a meter that shares a scale
++ * with peaks: a full-scale sine then reads full scale rather than -3. */
++#define RMS_OFFSET_DB 3.0103f
++
++/* A mechanical VU needle takes about 300 ms to settle, the same both ways.
++ * On a decibel scale that fall reads as twitchy, so the bar rises at that
++ * speed and falls more slowly. */
++#define RISE_TAU_MS 60.0f
++#define FALL_TAU_MS 190.0f
++#define PEAK_HOLD_MS 800
++#define PEAK_FALL_PER_MS (1.0f / 1400.0f) /* the whole scale in 1.4 s */
++/* A peak tick is this much of the bar wide. */
++#define PEAK_TICK_UNITS 20
++/* A needle swings this far either side of upright, in tenths of a degree: the
++ * quarter-circle fan of a classic VU dial. Redrawn only when it has moved by
++ * NEEDLE_STEP, since every new angle is a new transformed layer. */
++#define NEEDLE_HALF_SWING 450
++#define NEEDLE_STEP 5
++/* The spectrum bars. A band holds a tenth or so of the programme's energy, so
++ * its scale sits lower than the level's, and it moves faster: it is watched
++ * for rhythm, not read for level. */
++#define BAND_FLOOR_DB (-54.0f)
++#define BAND_TOP_DB 0.0f
++#define BAND_RISE_TAU_MS 35.0f
++#define BAND_FALL_TAU_MS 220.0f
++/* A band's bar is short, so its cap is a larger share of it than a peak tick. */
++#define BAND_CAP_UNITS 36
++/* The tick may not have run for a while (a popup, another screen); the
++ * ballistics then continue as if one long tick had passed, not all of it. */
++#define MAX_STEP_MS 200
++
++static lv_obj_t * level_bar[2]; /* an lv_bar or an lv_arc */
++static lv_obj_t * peak_bar[2];
++static lv_obj_t * needle[2];
++static int32_t needle_drawn[2];
++static bool peak_is_tick[2];
++static lv_obj_t * band_bar[LEVEL_METER_BANDS];
++static lv_obj_t * band_peak[LEVEL_METER_BANDS];
++static bool band_peak_is_tick[LEVEL_METER_BANDS];
++static float band_pos[LEVEL_METER_BANDS];
++static float band_peak_pos[LEVEL_METER_BANDS];
++static int32_t band_hold_ms[LEVEL_METER_BANDS];
++static bool have_bands;
++static float level_pos[2]; /* 0..1 along the scale */
++static float peak_pos[2];
++static int32_t peak_hold_ms[2];
++static uint32_t last_tick;
++static bool at_rest = true; /* everything drawn at zero and nothing arriving */
++
++static bool is_arc(const lv_obj_t * obj) { return lv_obj_has_class(obj, &lv_arc_class); }
++
++static lv_obj_t * find_meter(lv_obj_t * scr, const char * role) {
++    lv_obj_t * obj = lv_obj_find_by_name(scr, role);
++    if (obj && !lv_obj_has_class(obj, &lv_bar_class) && !is_arc(obj)) {
++        fprintf(stderr, "Warning: player layout: '%s' is not a bar or an arc, ignoring it\n", role);
++        return NULL;
++    }
++    return obj;
++}
++
++static float scale_pos(float db) {
++    float pos = (db - FLOOR_DB) / -FLOOR_DB;
++    return pos < 0.0f ? 0.0f : pos > 1.0f ? 1.0f : pos;
++}
++
++static float band_scale_pos(float db) {
++    float pos = (db - BAND_FLOOR_DB) / (BAND_TOP_DB - BAND_FLOOR_DB);
++    return pos < 0.0f ? 0.0f : pos > 1.0f ? 1.0f : pos;
++}
++
++/* Holds a peak for PEAK_HOLD_MS, then lets it fall to whatever is under it. */
++static void step_peak(float * peak, int32_t * hold_ms, float target, uint32_t step_ms) {
++    if (target >= *peak) {
++        *peak = target;
++        *hold_ms = PEAK_HOLD_MS;
++    } else if (*hold_ms > 0) {
++        *hold_ms -= (int32_t) step_ms;
++    } else {
++        *peak -= PEAK_FALL_PER_MS * (float) step_ms;
++        if (*peak < target) *peak = target;
++    }
++}
++
++static void draw_level(int c) {
++    int32_t value = (int32_t) (level_pos[c] * METER_RANGE + 0.5f);
++    if (level_bar[c] && is_arc(level_bar[c])) lv_arc_set_value(level_bar[c], value);
++    else if (level_bar[c]) lv_bar_set_value(level_bar[c], value, LV_ANIM_OFF);
++
++    if (needle[c]) {
++        int32_t angle = (int32_t) ((level_pos[c] * 2.0f - 1.0f) * NEEDLE_HALF_SWING);
++        int32_t moved = angle - needle_drawn[c];
++        if (moved >= NEEDLE_STEP || moved <= -NEEDLE_STEP || (angle == -NEEDLE_HALF_SWING && moved)) {
++            needle_drawn[c] = angle;
++            lv_obj_set_style_transform_rotation(needle[c], angle, 0);
++        }
++    }
++}
++
++/* A peak on an arc is always a short mark: the stretch of the dial just
++ * below the held peak, and nothing at all at the empty end. */
++static void draw_peak_arc(lv_obj_t * arc, float pos) {
++    int32_t start = lv_arc_get_bg_angle_start(arc);
++    int32_t sweep = (lv_arc_get_bg_angle_end(arc) - start + 360) % 360;
++    if (sweep == 0) sweep = 360;
++    int32_t at = (int32_t) (pos * (float) sweep + 0.5f);
++    int32_t mark = sweep * PEAK_TICK_UNITS / METER_RANGE;
++    if (mark < 2) mark = 2;
++    bool shown = at > mark / 2;
++    lv_opa_t opa = shown ? LV_OPA_COVER : LV_OPA_TRANSP;
++    if (lv_obj_get_style_arc_opa(arc, LV_PART_INDICATOR) != opa)
++        lv_obj_set_style_arc_opa(arc, opa, LV_PART_INDICATOR);
++    if (shown) lv_arc_set_angles(arc, (lv_value_precise_t) (start + (at > mark ? at - mark : 0)),
++                                 (lv_value_precise_t) (start + at));
++}
++
++static void draw_peak_obj(lv_obj_t * obj, float pos, int32_t tick_units);
++
++static void draw_peak(int c) {
++    if (peak_bar[c]) draw_peak_obj(peak_bar[c], peak_pos[c], peak_is_tick[c] ? PEAK_TICK_UNITS : 0);
++}
++
++static void draw_band(int b) {
++    if (band_bar[b]) {
++        int32_t value = (int32_t) (band_pos[b] * METER_RANGE + 0.5f);
++        if (is_arc(band_bar[b])) lv_arc_set_value(band_bar[b], value);
++        else lv_bar_set_value(band_bar[b], value, LV_ANIM_OFF);
++    }
++    if (band_peak[b]) draw_peak_obj(band_peak[b], band_peak_pos[b], band_peak_is_tick[b] ? BAND_CAP_UNITS : 0);
++}
++
++/* tick_units is how long a mark to draw at pos, or 0 for a filled bar. */
++static void draw_peak_obj(lv_obj_t * obj, float pos, int32_t tick_units) {
++    if (is_arc(obj)) {
++        draw_peak_arc(obj, pos);
++        return;
++    }
++    int32_t value = (int32_t) (pos * METER_RANGE + 0.5f);
++    if (tick_units) {
++        /* Nothing at all at the empty end, rather than a tick parked there. */
++        int32_t start = value > tick_units ? value - tick_units : 0;
++        if (value <= tick_units / 2) start = value = 0;
++        lv_bar_set_start_value(obj, start, LV_ANIM_OFF);
++    }
++    lv_bar_set_value(obj, value, LV_ANIM_OFF);
++}
++
++/* What every bar and arc of the meter gets, whatever it shows. */
++static void adopt(lv_obj_t * obj, lv_style_t * accent_style) {
++    if (is_arc(obj)) {
++        lv_arc_set_range(obj, 0, METER_RANGE);
++        /* A dial is read, not turned: no knob. */
++        lv_obj_set_style_opa(obj, LV_OPA_TRANSP, LV_PART_KNOB);
++    } else {
++        lv_bar_set_range(obj, 0, METER_RANGE);
++    }
++    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
++    if (accent_style) lv_obj_add_style(obj, accent_style, LV_PART_INDICATOR);
++}
++
++static bool is_tick(lv_obj_t * obj) {
++    return obj && !is_arc(obj) && lv_bar_get_mode(obj) == LV_BAR_MODE_RANGE;
++}
++
++void player_vu_meter_bind(lv_obj_t * scr, lv_style_t * rail_style, lv_style_t * arc_rail_style,
++                          lv_style_t * accent_style) {
++    static const char * const level_roles[2] = { "vu_left", "vu_right" };
++    static const char * const peak_roles[2] = { "vu_peak_left", "vu_peak_right" };
++    static const char * const needle_roles[2] = { "vu_needle_left", "vu_needle_right" };
++
++    player_vu_meter_reset();
++    for (int c = 0; c < 2; c++) {
++        level_bar[c] = find_meter(scr, level_roles[c]);
++        peak_bar[c] = find_meter(scr, peak_roles[c]);
++        needle[c] = lv_obj_find_by_name(scr, needle_roles[c]);
++        lv_obj_t * bars[2] = { level_bar[c], peak_bar[c] };
++        for (int i = 0; i < 2; i++)
++            if (bars[i]) adopt(bars[i], accent_style);
++        if (level_bar[c]) {
++            lv_style_t * rail = is_arc(level_bar[c]) ? arc_rail_style : rail_style;
++            if (rail) lv_obj_add_style(level_bar[c], rail, LV_PART_MAIN);
++        }
++        if (needle[c]) {
++            lv_obj_remove_flag(needle[c], LV_OBJ_FLAG_CLICKABLE);
++            needle_drawn[c] = -NEEDLE_HALF_SWING;
++            lv_obj_set_style_transform_rotation(needle[c], -NEEDLE_HALF_SWING, 0);
++        }
++        peak_is_tick[c] = is_tick(peak_bar[c]);
++        draw_level(c);
++        draw_peak(c);
++    }
++    for (int b = 0; b < LEVEL_METER_BANDS; b++) {
++        char role[24];
++        lv_snprintf(role, sizeof(role), "vu_band_%d", b + 1);
++        band_bar[b] = find_meter(scr, role);
++        lv_snprintf(role, sizeof(role), "vu_band_peak_%d", b + 1);
++        band_peak[b] = find_meter(scr, role);
++        if (band_bar[b]) {
++            adopt(band_bar[b], accent_style);
++            lv_style_t * rail = is_arc(band_bar[b]) ? arc_rail_style : rail_style;
++            if (rail) lv_obj_add_style(band_bar[b], rail, LV_PART_MAIN);
++        }
++        if (band_peak[b]) adopt(band_peak[b], accent_style);
++        band_peak_is_tick[b] = is_tick(band_peak[b]);
++        if (band_bar[b] || band_peak[b]) have_bands = true;
++        draw_band(b);
++    }
++    last_tick = lv_tick_get();
++}
++
++void player_vu_meter_reset(void) {
++    memset(level_bar, 0, sizeof(level_bar));
++    memset(peak_bar, 0, sizeof(peak_bar));
++    memset(needle, 0, sizeof(needle));
++    memset(peak_is_tick, 0, sizeof(peak_is_tick));
++    memset(level_pos, 0, sizeof(level_pos));
++    memset(peak_pos, 0, sizeof(peak_pos));
++    memset(peak_hold_ms, 0, sizeof(peak_hold_ms));
++    memset(band_bar, 0, sizeof(band_bar));
++    memset(band_peak, 0, sizeof(band_peak));
++    memset(band_peak_is_tick, 0, sizeof(band_peak_is_tick));
++    memset(band_pos, 0, sizeof(band_pos));
++    memset(band_peak_pos, 0, sizeof(band_peak_pos));
++    memset(band_hold_ms, 0, sizeof(band_hold_ms));
++    have_bands = false;
++    at_rest = true;
++}
++
++bool player_vu_meter_present(void) {
++    return level_bar[0] || level_bar[1] || peak_bar[0] || peak_bar[1] || needle[0] || needle[1] || have_bands;
++}
++
++void player_vu_meter_tick(void) {
++    if (!player_vu_meter_present()) return;
++
++    level_meter_request(have_bands);
++    level_meter_levels_t levels;
++    bool sounding = level_meter_read(&levels);
++
++    uint32_t now = lv_tick_get();
++    uint32_t step_ms = now - last_tick;
++    last_tick = now;
++    if (at_rest && !sounding) return; /* paused or stopped, and already drawn empty */
++    if (step_ms > MAX_STEP_MS) step_ms = MAX_STEP_MS;
++
++    float rise = 1.0f - expf(-(float) step_ms / RISE_TAU_MS);
++    float fall = 1.0f - expf(-(float) step_ms / FALL_TAU_MS);
++    bool resting = !sounding;
++    for (int c = 0; c < 2; c++) {
++        float level_target = 0.0f, peak_target = 0.0f;
++        if (sounding) {
++            if (levels.mean_square[c] > 0.0f)
++                level_target = scale_pos(10.0f * log10f(levels.mean_square[c]) + RMS_OFFSET_DB);
++            if (levels.peak[c] > 0.0f) peak_target = scale_pos(20.0f * log10f(levels.peak[c]));
++        }
++
++        level_pos[c] += (level_target - level_pos[c]) * (level_target > level_pos[c] ? rise : fall);
++        if (level_pos[c] < 0.0005f) level_pos[c] = 0.0f;
++
++        step_peak(&peak_pos[c], &peak_hold_ms[c], peak_target, step_ms);
++
++        draw_level(c);
++        draw_peak(c);
++        if (level_pos[c] > 0.0f || peak_pos[c] > 0.0f) resting = false;
++    }
++    if (have_bands) {
++        float band_rise = 1.0f - expf(-(float) step_ms / BAND_RISE_TAU_MS);
++        float band_fall = 1.0f - expf(-(float) step_ms / BAND_FALL_TAU_MS);
++        for (int b = 0; b < LEVEL_METER_BANDS; b++) {
++            if (!band_bar[b] && !band_peak[b]) continue;
++            float target = 0.0f;
++            if (sounding && levels.band_mean_square[b] > 0.0f)
++                target = band_scale_pos(10.0f * log10f(levels.band_mean_square[b]) + RMS_OFFSET_DB);
++            band_pos[b] += (target - band_pos[b]) * (target > band_pos[b] ? band_rise : band_fall);
++            if (band_pos[b] < 0.0005f) band_pos[b] = 0.0f;
++            /* The cap rides the bar itself, not the raw level: it marks where
++             * the bar has been. */
++            step_peak(&band_peak_pos[b], &band_hold_ms[b], band_pos[b], step_ms);
++            draw_band(b);
++            if (band_pos[b] > 0.0f || band_peak_pos[b] > 0.0f) resting = false;
++        }
++    }
++    at_rest = resting;
++}
+diff --git a/src/ui/player/meter/player_vu_meter.h b/src/ui/player/meter/player_vu_meter.h
+new file mode 100644
+index 0000000..f0271db
+--- /dev/null
++++ b/src/ui/player/meter/player_vu_meter.h
+@@ -0,0 +1,63 @@
++#ifndef PLAYER_VU_METER_H
++#define PLAYER_VU_METER_H
++
++#include "lvgl/lvgl.h"
++#include <stdbool.h>
++
++/* Level meter for Now Playing layouts.
++ *
++ * A layout opts in by naming widgets:
++ *
++ *   vu_left, vu_right              the level, with VU-like ballistics;
++ *                                  an lv_bar (or lv_slider), or an lv_arc
++ *                                  for a round dial
++ *   vu_peak_left, vu_peak_right    the peak, held for a moment, then
++ *                                  falling; an lv_bar or an lv_arc
++ *   vu_needle_left, vu_needle_right  any object, turned about its transform
++ *                                  pivot with the level: 45 degrees left of
++ *                                  upright when empty, 45 right when full,
++ *                                  which is the fan of an arc from 225 to
++ *                                  315 degrees
++ *
++ *   vu_band_1 ... vu_band_10       a spectrum: the level of the mono mix in
++ *                                  ten bands an octave apart, 31 Hz to
++ *                                  16 kHz; an lv_bar or an lv_arc each
++ *   vu_band_peak_1 ... _10         a cap that rides each band's bar, held
++ *                                  and then falling
++ *
++ * All are optional and independent; a layout with only vu_left gets a
++ * mono-looking meter of the left channel. The player owns each bar's range
++ * and value. The spectrum is only measured for a layout that names a band,
++ * and its scale runs from -54 dB to full scale, a band being a fraction of the
++ * whole. The level's scale is linear in decibels from -48 dB at the empty end to
++ * full scale at the other; the level is RMS, read so that a full-scale sine
++ * fills the bar. A peak bar declared with mode="range" is drawn as a short
++ * tick at the held peak instead of a filled bar, so it can sit on top of a
++ * level bar as a peak-hold mark. A peak arc is always drawn as such a mark.
++ *
++ * A layout may wrap its meter in an object named vu_meter; the bars are found
++ * inside it all the same, and the whole group, captions included, is then
++ * hidden with the transport controls while the lyrics are open. Without the
++ * group only the bars and arcs are, so a layout with needles wants the group.
++ *
++ * The bars and arcs take the theme accent on their indicator and, when given,
++ * the backdrop rail style on the level's track; local XML style properties
++ * outrank both. An arc's knob is hidden. Everything is made non-clickable so
++ * swipes pass through. */
++
++/* Finds the roles under scr. The two rail styles (for bars and for arcs) may
++ * be NULL. Safe to call again for a new tree after player_vu_meter_reset(). */
++void player_vu_meter_bind(lv_obj_t * scr, lv_style_t * rail_style, lv_style_t * arc_rail_style,
++                          lv_style_t * accent_style);
++
++/* Forgets the widgets (they belong to a tree that is going away). */
++void player_vu_meter_reset(void);
++
++/* True when the bound layout has at least one meter widget. */
++bool player_vu_meter_present(void);
++
++/* Advances the meter; call on the player UI tick while the Now Playing
++ * screen is the one being drawn. Not calling it lets the audio tap go idle. */
++void player_vu_meter_tick(void);
++
++#endif
+diff --git a/src/ui/player/screen/gui_player.c b/src/ui/player/screen/gui_player.c
+index 54b495e..e94bb7a 100644
+--- a/src/ui/player/screen/gui_player.c
++++ b/src/ui/player/screen/gui_player.c
+@@ -59,6 +59,7 @@
+ #include "../artwork/player_artwork_cache.h"
+ #include "../artwork/player_artwork_jobs.h"
+ #include "../lyrics/player_inline_lyrics.h"
++#include "../meter/player_vu_meter.h"
+ #include "../../effects/transition_compositor.h"
+ #include "lvgl/src/core/lv_obj_draw_private.h"
+ #include "lvgl/src/draw/sw/lv_draw_sw_private.h"
+@@ -1058,6 +1059,14 @@ static void player_bind_lyrics_pane(lv_obj_t * scr, const player_roles_t * r, pl
+                                 player_obj_is_ancestor_of(kept[k], controls[i]))) hide = false;
+             if (hide) player_add_lyrics_control(controls[i]);
+         }
++        /* The level meter leaves with the controls: as one group when the
++         * layout wraps it in "vu_meter" (so its captions go too), bar by bar
++         * otherwise. */
++        lv_obj_t * meter_group = player_find_role(scr, "vu_meter", NULL);
++        static const char * const meter_bars[] = { "vu_left", "vu_right", "vu_peak_left", "vu_peak_right" };
++        if (meter_group) player_add_lyrics_control(meter_group);
++        else for (unsigned i = 0; i < sizeof(meter_bars) / sizeof(meter_bars[0]); ++i)
++            player_add_lyrics_control(player_find_role(scr, meter_bars[i], NULL));
+     }
+ 
+     /* Named timelines an XML layout may provide; resolved once, here. */
+@@ -1158,6 +1167,11 @@ static bool player_bind_widgets(lv_obj_t * scr) {
+         scr, r.cover_fade, r.lyrics_area, NULL, NULL, false);
+     player_bind_lyrics_look(scr, &r);
+     player_style_custom_layout(scr, &r);
++    /* Optional level meter roles (player_vu_meter.h). After the styling
++     * above, which is what initializes the backdrop rail style. */
++    player_vu_meter_bind(scr, player_layout_builtin ? NULL : player_backdrop_progress_style(false),
++                         player_layout_builtin ? NULL : player_backdrop_progress_style(true),
++                         gui_theme_accent_style());
+ 
+     /* Queue counts must stay on one line even when an XML layout gives the
+      * label a narrow fixed width. Keep content-width labels content-sized so
+@@ -1227,6 +1241,7 @@ static void player_reset_widget_globals(void) {
+     player_inline_lyrics_reset();
+     if (player_waveform_seekbar) waveform_cancel();
+     player_waveform_seekbar = false;
++    player_vu_meter_reset();
+     player_overlay_panel = NULL;
+     player_background_img = NULL;
+     cover_card = NULL;
+@@ -1729,6 +1744,15 @@ bool gui_player_sync_popup_pause(void) {
+     return blocked;
+ }
+ 
++/* Moves the level meter of a layout that has one. Only while Now Playing is
++ * the screen on show: the audio thread measures levels only as long as this
++ * keeps asking. Runs without an active track too, so the bars fall back to
++ * empty after a stop instead of freezing where the music left them. */
++void gui_player_update_vu_meter(void) {
++    if (!player_screen || lv_screen_active() != player_screen) return;
++    player_vu_meter_tick();
++}
++
+ void gui_player_update_progress(void) {
+     if (gui_popup_visible_count() > 0 || gui_queue_song_context_menu_visible()) return;
+     if (player_waveform_seekbar && progress_slider) {
+diff --git a/src/ui/player/screen/gui_player.h b/src/ui/player/screen/gui_player.h
+index 1ab9ceb..6edbe79 100644
+--- a/src/ui/player/screen/gui_player.h
++++ b/src/ui/player/screen/gui_player.h
+@@ -48,6 +48,8 @@ void gui_player_seed_selection_song(const char * path, const track_metadata_t *
+ void gui_player_service_artwork_cache(void);
+ void poll_cover_decode(void);
+ void gui_player_update_progress(void);
++/* Advances the Now Playing level meter, if the layout has one. */
++void gui_player_update_vu_meter(void);
+ bool gui_player_sync_popup_pause(void);
+ void gui_format_time(double seconds, char * buf, size_t buf_size);
+ void show_volume_popup(int32_t percent);
+-- 
+2.43.0
+

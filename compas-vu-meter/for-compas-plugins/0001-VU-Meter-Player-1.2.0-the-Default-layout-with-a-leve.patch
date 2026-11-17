@@ -1,0 +1,1037 @@
+From 5397c82d347d7aecc5cc71c3bddb55231f4e167a Mon Sep 17 00:00:00 2001
+From: Krish Paul <me@krishnendu.com>
+Date: Wed, 18 Nov 2026 04:55:58 +0800
+Subject: [PATCH] VU Meter Player 1.2.0: the Default layout with a level meter
+
+Three layouts in one package, for all four screen sizes. VU Meter Player
+has two slim bars under the cover in the theme's accent, with a peak-hold
+mark. VU Dial Player has two round dials with needles in their place. VU
+Spectrum Player has a ten-band spectrum with falling caps. The player
+draws the meters; the layouts only name the widgets, so they are offered
+only where the player reports ui.player_layout_meter.
+
+PLUGINS.md documents the meter's widget names for other layouts.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ PLUGINS.md                                    |  69 ++++++++++++
+ README.md                                     |   1 +
+ plugins/VUMeterPlayer/VUMeterPlayer.lua       | 102 ++++++++++++++++++
+ .../player_layouts/vu_dial_player.xml         |  49 +++++++++
+ .../player_layouts/vu_dial_player/v1_back.png | Bin 0 -> 323 bytes
+ .../player_layouts/vu_dial_player_240x320.xml |  48 +++++++++
+ .../player_layouts/vu_dial_player_320x480.xml |  49 +++++++++
+ .../player_layouts/vu_dial_player_480x720.xml |  49 +++++++++
+ .../player_layouts/vu_meter_player.xml        |  41 +++++++
+ .../vu_meter_player/v1_back.png               | Bin 0 -> 323 bytes
+ .../vu_meter_player_240x320.xml               |  40 +++++++
+ .../vu_meter_player_320x480.xml               |  41 +++++++
+ .../vu_meter_player_480x720.xml               |  41 +++++++
+ .../player_layouts/vu_spectrum_player.xml     |  57 ++++++++++
+ .../vu_spectrum_player/v1_back.png            | Bin 0 -> 323 bytes
+ .../vu_spectrum_player_240x320.xml            |  58 ++++++++++
+ .../vu_spectrum_player_320x480.xml            |  57 ++++++++++
+ .../vu_spectrum_player_480x720.xml            |  57 ++++++++++
+ plugins/VUMeterPlayer/store.json              |  67 ++++++++++++
+ 19 files changed, 826 insertions(+)
+ create mode 100644 plugins/VUMeterPlayer/VUMeterPlayer.lua
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_dial_player.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_dial_player/v1_back.png
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_dial_player_240x320.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_dial_player_320x480.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_dial_player_480x720.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_meter_player.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_meter_player/v1_back.png
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_meter_player_240x320.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_meter_player_320x480.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_meter_player_480x720.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_spectrum_player.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_spectrum_player/v1_back.png
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_240x320.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_320x480.xml
+ create mode 100644 plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_480x720.xml
+ create mode 100644 plugins/VUMeterPlayer/store.json
+
+diff --git a/PLUGINS.md b/PLUGINS.md
+index ebc1191..2e33013 100644
+--- a/PLUGINS.md
++++ b/PLUGINS.md
+@@ -1035,6 +1035,75 @@ plugin.now_playing.set_text("plugin_caption", "Chapter 2")
+   the cover, hide the required native `cover_img` in your XML and place a
+   custom image in the desired position.
+ 
++### Level meter in a Player layout (`ui.player_layout_meter`)
++
++An XML Now Playing layout can show a stereo level meter (a VU meter) by
++naming widgets: `lv_bar` for a straight meter, `lv_arc` for a round dial,
++and any object as a needle. The player finds them and moves them; no Lua runs
++per frame, and nothing is measured while no layout with a meter is on screen.
++
++| Name | Shows |
++| --- | --- |
++| `vu_left`, `vu_right` | The level of each channel, with VU-like ballistics: quick up, slower down. An `lv_bar` or an `lv_arc`. |
++| `vu_peak_left`, `vu_peak_right` | The peak of each channel, held for a moment and then falling. An `lv_bar` or an `lv_arc`. |
++| `vu_needle_left`, `vu_needle_right` | Any object, turned about its transform pivot with the level: 45 degrees left of upright when empty, 45 degrees right when full. |
++| `vu_band_1` … `vu_band_10` | A spectrum: the level of the mono mix in ten bands an octave apart, centred on 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz. An `lv_bar` or an `lv_arc` each; name only the bands you show. |
++| `vu_band_peak_1` … `vu_band_peak_10` | A cap that rides each band's bar, held for a moment and then falling. With `mode="range"` it is drawn as a short mark. |
++| `vu_meter` | Optional `lv_obj` around the meter. The group, captions included, is hidden with the transport controls while the lyrics are open; without it only the bars are. |
++
++```xml
++<lv_obj name="vu_meter" x="0" y="520" width="#screen_w" height="38" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++    <lv_label name="caption_vu_left" text="L" x="30" y="2" width="18" height="content" style_text_font="font_16" />
++    <lv_bar name="vu_left" x="56" y="8" width="394" height="8" style_radius="4" />
++    <lv_bar name="vu_peak_left" mode="range" x="56" y="8" width="394" height="8" style_radius="4" style_bg_opa="0" />
++    <lv_label name="caption_vu_right" text="R" x="30" y="24" width="18" height="content" style_text_font="font_16" />
++    <lv_bar name="vu_right" x="56" y="30" width="394" height="8" style_radius="4" />
++    <lv_bar name="vu_peak_right" mode="range" x="56" y="30" width="394" height="8" style_radius="4" style_bg_opa="0" />
++</lv_obj>
++```
++
++A round dial is an arc from 225 to 315 degrees with a needle pivoted at the
++arc's centre, which is the fan the needle sweeps:
++
++```xml
++<lv_arc name="vu_left" x="-28" y="8" width="260" height="260" bg_start_angle="225" bg_end_angle="315" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_bg_opa="0" style_pad_all="0" />
++<lv_arc name="vu_peak_left" x="-28" y="8" width="260" height="260" bg_start_angle="225" bg_end_angle="315" style_arc_width="6" style_arc_width:indicator="6" style_arc_opa="0" style_bg_opa="0" style_pad_all="0" />
++<lv_obj name="vu_needle_left" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" style_border_width="0" style_pad_all="0" />
++```
++
++- A peak arc is always drawn as a short mark on the dial. An arc's knob is
++  hidden. Any `bg_start_angle`/`bg_end_angle` works for the arcs; the
++  needle's swing is fixed at 45 degrees either side of upright.
++- A layout with needles should use the `vu_meter` group, since a needle is
++  not hidden on its own while the lyrics are open.
++A spectrum is a row of vertical bars, each with its cap laid over it:
++
++```xml
++<lv_bar name="vu_band_1" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_bg_opa="38" />
++<lv_bar name="vu_band_peak_1" mode="range" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_bg_opa="0" />
++```
++
++- The spectrum's scale runs from -54 dB to full scale in each band. It is
++  only measured while a layout that names a band is on screen; it costs
++  noticeably more processor time than the level alone.
++- All of these are optional and independent. The player sets each bar's
++  range and value; `min_value`, `max_value` and `value` in the XML are ignored.
++- The scale is linear in decibels, from -48 dB at the empty end to full scale
++  at the other. The level is RMS, read so that a full-scale sine fills the bar.
++- A peak bar with `mode="range"` is drawn as a short mark at the held peak
++  instead of a filled bar. Put it over the level bar with a transparent track
++  (`style_bg_opa="0"`), as above, for a peak-hold mark.
++- The indicator takes the theme accent and a level bar's or arc's track the
++  same rail color as the seek bar. Local XML style properties outrank both; use a part
++  selector for the indicator, for example `style_bg_color:indicator="0xffffff"`.
++- A vertical meter is a bar taller than wide, or `orientation="vertical"`.
++- The bars are not clickable, so swipes pass through them.
++- The meter follows what is heard, allowing for the output buffer. Over
++  Bluetooth and a USB DAC that allowance is an estimate. Native DSD (DoP)
++  output has no PCM level to read and leaves the meter empty.
++- Check `plugin.has_capability("ui.player_layout_meter")` before offering a
++  layout built around the meter: an older player shows the bars empty.
++
+ ### `plugin.refresh_theme()`
+ 
+ Applies icon changes and the Home and launcher layouts, without disturbing
+diff --git a/README.md b/README.md
+index d9ce2e8..648ffbf 100644
+--- a/README.md
++++ b/README.md
+@@ -62,6 +62,7 @@ Download and install Default Waveform Player, Gallery Waveform Player, Hiby's Pl
+ - **Panorama Player** combines full-width artwork, a smooth cover fade, animated lyrics, and rounded waveform bars.
+ - **Vinyl Player** uses a record-inspired layout with an envelope waveform seek bar.
+ - **Orbit Player** uses circular artwork and a circular seek bar.
++- **VU Meter Player** keeps the Default layout and adds a stereo level meter with peak hold under the cover. The same package adds **VU Dial Player**, with two round dials and needles in place of the bars, and **VU Spectrum Player**, with a ten-band spectrum. It needs a player with the level meter (capability `ui.player_layout_meter`); on an older player the layouts are not offered.
+ 
+ ## v1.1 plugins (API 16 and 17)
+ 
+diff --git a/plugins/VUMeterPlayer/VUMeterPlayer.lua b/plugins/VUMeterPlayer/VUMeterPlayer.lua
+new file mode 100644
+index 0000000..502b41a
+--- /dev/null
++++ b/plugins/VUMeterPlayer/VUMeterPlayer.lua
+@@ -0,0 +1,102 @@
++-- The built-in Now Playing screen with a stereo level meter under the cover,
++-- in three forms: VU Meter Player has two slim bars, VU Dial Player two round
++-- dials with needles, and VU Spectrum Player ten bars, one per octave.
++--
++-- The meter is drawn by the player itself: the layouts only name the widgets
++-- (vu_left, vu_right, vu_peak_left, vu_peak_right, for the dials
++-- vu_needle_left, vu_needle_right, and for the spectrum vu_band_1 to
++-- vu_band_10 with their vu_band_peak_ caps) and the player moves them. A player
++-- without the meter would leave them still, so the layouts are only offered
++-- where the capability is present.
++
++plugin.define({
++    id = "org.krishnendu.vu_meter_player",
++    name = "VU Meter Player",
++    version = "1.2.0",
++    api_min = 19,
++})
++
++local T = {
++    de = {
++        ["VU Meter Player"] = "VU-Meter-Player",
++        ["VU Dial Player"] = "VU-Zeiger-Player",
++        ["VU Spectrum Player"] = "VU-Spektrum-Player",
++    },
++    es = {
++        ["VU Meter Player"] = "Reproductor con vúmetro",
++        ["VU Dial Player"] = "Reproductor con vúmetro de aguja",
++        ["VU Spectrum Player"] = "Reproductor con analizador de espectro",
++    },
++    fi = {
++        ["VU Meter Player"] = "VU-mittarisoitin",
++        ["VU Dial Player"] = "VU-osoitinsoitin",
++        ["VU Spectrum Player"] = "VU-spektrisoitin",
++    },
++    fr = {
++        ["VU Meter Player"] = "Lecteur avec vumètre",
++        ["VU Dial Player"] = "Lecteur avec vumètre à aiguille",
++        ["VU Spectrum Player"] = "Lecteur avec analyseur de spectre",
++    },
++    it = {
++        ["VU Meter Player"] = "Lettore con VU meter",
++        ["VU Dial Player"] = "Lettore con VU meter ad ago",
++        ["VU Spectrum Player"] = "Lettore con analizzatore di spettro",
++    },
++    ja = {
++        ["VU Meter Player"] = "VUメータープレーヤー",
++        ["VU Dial Player"] = "VUダイヤルプレーヤー",
++        ["VU Spectrum Player"] = "VUスペクトラムプレーヤー",
++    },
++    nl = {
++        ["VU Meter Player"] = "VU-meterspeler",
++        ["VU Dial Player"] = "VU-wijzerspeler",
++        ["VU Spectrum Player"] = "VU-spectrumspeler",
++    },
++    pt = {
++        ["VU Meter Player"] = "Reprodutor com VU meter",
++        ["VU Dial Player"] = "Reprodutor com VU meter de ponteiro",
++        ["VU Spectrum Player"] = "Reprodutor com analisador de espectro",
++    },
++    ru = {
++        ["VU Meter Player"] = "Плеер с VU-индикатором",
++        ["VU Dial Player"] = "Плеер со стрелочным VU-индикатором",
++        ["VU Spectrum Player"] = "Плеер с анализатором спектра",
++    },
++    uk = {
++        ["VU Meter Player"] = "Плеєр із VU-індикатором",
++        ["VU Dial Player"] = "Плеєр зі стрілковим VU-індикатором",
++        ["VU Spectrum Player"] = "Плеєр з аналізатором спектра",
++    },
++    vi = {
++        ["VU Meter Player"] = "Trình phát có đồng hồ VU",
++        ["VU Dial Player"] = "Trình phát có đồng hồ VU kim",
++        ["VU Spectrum Player"] = "Trình phát có phổ tần",
++    },
++    zh_CN = {
++        ["VU Meter Player"] = "VU 表播放器",
++        ["VU Dial Player"] = "VU 指针表播放器",
++        ["VU Spectrum Player"] = "VU 频谱播放器",
++    },
++}
++local function tr(s)
++    return plugin.tr(s, T)
++end
++
++if plugin.has_capability and plugin.has_capability("ui.player_layout_xml")
++        and plugin.has_capability("ui.player_layout_meter") then
++    plugin.set_player_layout({
++        id = "plugin.vu_meter_player",
++        xml = "VUMeterPlayer/player_layouts/vu_meter_player.xml",
++        name = tr("VU Meter Player"),
++    })
++    plugin.set_player_layout({
++        id = "plugin.vu_dial_player",
++        xml = "VUMeterPlayer/player_layouts/vu_dial_player.xml",
++        name = tr("VU Dial Player"),
++    })
++    plugin.set_player_layout({
++        id = "plugin.vu_spectrum_player",
++        xml = "VUMeterPlayer/player_layouts/vu_spectrum_player.xml",
++        name = tr("VU Spectrum Player"),
++    })
++end
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_dial_player.xml b/plugins/VUMeterPlayer/player_layouts/vu_dial_player.xml
+new file mode 100644
+index 0000000..9f72811
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_dial_player.xml
+@@ -0,0 +1,49 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="145" y="150" width="190" height="190" scrollable="false" style_radius="10" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="10" y="10" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="134" y="134" width="44" height="44" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="36" height="36" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="62" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="36" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="83" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="117" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="350" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="36" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="14" style_pad_ver="6" style_pad_column="10">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="398" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="30" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_left" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_left" text="L" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++            <lv_obj x="246" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_right" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_right" text="R" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="580" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="37" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="122" y="676" width="40" height="40" inner_align="contain" />
++        <lv_obj name="play_circle" x="198" y="654" width="84" height="84" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="84" height="84" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="318" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="403" y="676" width="40" height="40" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_dial_player/v1_back.png b/plugins/VUMeterPlayer/player_layouts/vu_dial_player/v1_back.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c221d603a24ecfe0b5d4678be195e49e22d498f
+GIT binary patch
+literal 323
+zcmV-J0lfZ+P)<h;3K|Lk000e1NJLTq001li001lq1^@s69)wx}0003BNkl<Zc%1Fo
+zyA8rX5QO31^k5`9Ab=uxR6!B+LJ@SqqX-Bn0YM86NE{Flz<Os+NH+zHKAq0e-n!|!
+zj(^IiG~m}%usRj2jvL$pM_?W;aDvCc30MNVXo(Bl0ta9Q+<;BA$N_%81~*^<+@ob`
+za4HrtI30@+EWsiI%diN*QY^_}IhI7Q1xpgxh9v=P#WE0V$1(t11WOQH3`^2S*Ccd&
+zoe1~|tbhwJ?PuJH!1giG6E21xawUqOhu&d3I^(0WqO)cR8#;4Zv!Ju*VL4jy;*g?M
+zZ#o%T`D&J+)q9C_v}5y=igxYRp1>No_UL`I$hp0I^e24=w$YNN{zVd}g4L;DbzV@m
+VUO%;L35@^%002ovPDHLkV1jb*ft>&V
+
+literal 0
+HcmV?d00001
+
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_dial_player_240x320.xml b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_240x320.xml
+new file mode 100644
+index 0000000..b2b7e94
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_240x320.xml
+@@ -0,0 +1,48 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="88" y="8" width="64" height="64" scrollable="false" style_radius="0" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="4" y="4" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" hidden="true" />
++            <lv_obj name="favorite_circle" x="32" y="32" width="32" height="32" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="0" y="8" width="32" height="32" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0">
++            <lv_image src="v1_back" x="8" y="8" width="16" height="16" inner_align="contain" />
++        </lv_obj>
++        <lv_label name="title" text="" x="11" y="80" width="218" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="11" y="106" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="11" y="106" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" hidden="true" />
++        <lv_obj name="quality_pill" x="0" y="130" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="14" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="6" style_pad_ver="2" style_pad_column="4">
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="152" width="#screen_w" height="68" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="12" y="0" width="104" height="64" style_radius="10" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_left" x="-2" y="4" width="108" height="108" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="3" style_arc_width:indicator="3" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_left" x="-2" y="4" width="108" height="108" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="3" style_arc_width:indicator="3" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_left" x="51" y="12" width="2" height="46" style_radius="2" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="46" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="48" y="54" width="8" height="8" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++            </lv_obj>
++            <lv_obj x="124" y="0" width="104" height="64" style_radius="10" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_right" x="-2" y="4" width="108" height="108" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="3" style_arc_width:indicator="3" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_right" x="-2" y="4" width="108" height="108" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="3" style_arc_width:indicator="3" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_right" x="51" y="12" width="2" height="46" style_radius="2" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="46" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="48" y="54" width="8" height="8" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="12" y="222" width="216" height="8" style_radius="4" />
++        <lv_label name="pos_label" text="0:00" x="12" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="156" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="13" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="55" y="264" width="32" height="32" inner_align="contain" />
++        <lv_obj name="play_circle" x="98" y="258" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="44" height="44" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="153" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="196" y="264" width="32" height="32" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_dial_player_320x480.xml b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_320x480.xml
+new file mode 100644
+index 0000000..5b34c12
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_320x480.xml
+@@ -0,0 +1,49 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="100" y="91" width="120" height="120" scrollable="false" style_radius="6" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="6" y="6" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="88" y="88" width="26" height="26" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="15" y="37" width="26" height="26" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="15" y="22" width="290" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="15" y="45" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="15" y="68" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="218" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="22" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="8" style_pad_ver="4" style_pad_column="6">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="246" width="#screen_w" height="100" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="20" y="0" width="136" height="96" style_radius="12" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_left" x="-14" y="6" width="164" height="164" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="4" style_arc_width:indicator="4" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_left" x="-14" y="6" width="164" height="164" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="4" style_arc_width:indicator="4" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_left" x="67" y="18" width="3" height="70" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="70" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="63" y="83" width="10" height="10" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_left" text="L" x="9" y="72" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++            <lv_obj x="164" y="0" width="136" height="96" style_radius="12" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_right" x="-14" y="6" width="164" height="164" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="4" style_arc_width:indicator="4" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_right" x="-14" y="6" width="164" height="164" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="4" style_arc_width:indicator="4" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_right" x="67" y="18" width="3" height="70" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="70" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="63" y="83" width="10" height="10" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_right" text="R" x="9" y="72" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="20" y="352" width="280" height="10" style_radius="5" />
++        <lv_label name="pos_label" text="0:00" x="20" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="220" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="26" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="83" y="404" width="24" height="24" inner_align="contain" />
++        <lv_obj name="play_circle" x="135" y="391" width="50" height="50" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="50" height="50" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="213" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="270" y="404" width="24" height="24" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_dial_player_480x720.xml b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_480x720.xml
+new file mode 100644
+index 0000000..cd5f036
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_dial_player_480x720.xml
+@@ -0,0 +1,49 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="165" y="135" width="150" height="150" scrollable="false" style_radius="9" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="9" y="9" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="104" y="104" width="40" height="40" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="32" height="32" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="56" width="40" height="40" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="32" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="68" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="97" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="293" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="32" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="13" style_pad_ver="5" style_pad_column="9">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="336" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="30" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_left" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_left" text="L" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++            <lv_obj x="246" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_arc name="vu_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++                <lv_arc name="vu_peak_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
++                <lv_obj name="vu_needle_right" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
++                <lv_label name="caption_vu_right" text="R" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="522" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="39" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="124" y="612" width="36" height="36" inner_align="contain" />
++        <lv_obj name="play_circle" x="202" y="592" width="76" height="76" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="76" height="76" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="320" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="405" y="612" width="36" height="36" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_meter_player.xml b/plugins/VUMeterPlayer/player_layouts/vu_meter_player.xml
+new file mode 100644
+index 0000000..8290bff
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_meter_player.xml
+@@ -0,0 +1,41 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="85" y="152" width="310" height="310" scrollable="false" style_radius="10" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="10" y="10" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="254" y="254" width="44" height="44" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="36" height="36" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="62" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="36" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="83" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="117" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="474" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="36" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="14" style_pad_ver="6" style_pad_column="10">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="520" width="#screen_w" height="46" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_label name="caption_vu_left" text="L" x="30" y="2" width="18" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_left" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_left" mode="range" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            <lv_label name="caption_vu_right" text="R" x="30" y="24" width="18" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_right" x="56" y="30" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_right" mode="range" x="56" y="30" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="580" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="37" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="122" y="676" width="40" height="40" inner_align="contain" />
++        <lv_obj name="play_circle" x="198" y="654" width="84" height="84" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="84" height="84" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="318" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="403" y="676" width="40" height="40" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_meter_player/v1_back.png b/plugins/VUMeterPlayer/player_layouts/vu_meter_player/v1_back.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c221d603a24ecfe0b5d4678be195e49e22d498f
+GIT binary patch
+literal 323
+zcmV-J0lfZ+P)<h;3K|Lk000e1NJLTq001li001lq1^@s69)wx}0003BNkl<Zc%1Fo
+zyA8rX5QO31^k5`9Ab=uxR6!B+LJ@SqqX-Bn0YM86NE{Flz<Os+NH+zHKAq0e-n!|!
+zj(^IiG~m}%usRj2jvL$pM_?W;aDvCc30MNVXo(Bl0ta9Q+<;BA$N_%81~*^<+@ob`
+za4HrtI30@+EWsiI%diN*QY^_}IhI7Q1xpgxh9v=P#WE0V$1(t11WOQH3`^2S*Ccd&
+zoe1~|tbhwJ?PuJH!1giG6E21xawUqOhu&d3I^(0WqO)cR8#;4Zv!Ju*VL4jy;*g?M
+zZ#o%T`D&J+)q9C_v}5y=igxYRp1>No_UL`I$hp0I^e24=w$YNN{zVd}g4L;DbzV@m
+VUO%;L35@^%002ovPDHLkV1jb*ft>&V
+
+literal 0
+HcmV?d00001
+
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_meter_player_240x320.xml b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_240x320.xml
+new file mode 100644
+index 0000000..0a6def6
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_240x320.xml
+@@ -0,0 +1,40 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="68" y="8" width="104" height="104" scrollable="false" style_radius="0" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="4" y="4" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" hidden="true" />
++            <lv_obj name="favorite_circle" x="66" y="66" width="32" height="32" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="0" y="8" width="32" height="32" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0">
++            <lv_image src="v1_back" x="8" y="8" width="16" height="16" inner_align="contain" />
++        </lv_obj>
++        <lv_label name="title" text="" x="11" y="118" width="218" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="11" y="144" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="11" y="144" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" hidden="true" />
++        <lv_obj name="quality_pill" x="0" y="170" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="14" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="6" style_pad_ver="2" style_pad_column="4">
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="189" width="#screen_w" height="32" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_bar name="vu_left" x="12" y="8" width="216" height="5" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_left" mode="range" x="12" y="8" width="216" height="5" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            <lv_bar name="vu_right" x="12" y="19" width="216" height="5" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_right" mode="range" x="12" y="19" width="216" height="5" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++        </lv_obj>
++        <lv_slider name="progress_slider" x="12" y="220" width="216" height="8" style_radius="4" />
++        <lv_label name="pos_label" text="0:00" x="12" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="156" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="13" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="55" y="264" width="32" height="32" inner_align="contain" />
++        <lv_obj name="play_circle" x="98" y="258" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="44" height="44" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="153" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="196" y="264" width="32" height="32" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_meter_player_320x480.xml b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_320x480.xml
+new file mode 100644
+index 0000000..ffc8667
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_320x480.xml
+@@ -0,0 +1,41 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="68" y="91" width="184" height="184" scrollable="false" style_radius="6" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="6" y="6" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="152" y="152" width="26" height="26" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="15" y="37" width="26" height="26" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="15" y="22" width="290" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="15" y="45" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="15" y="68" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="283" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="22" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="8" style_pad_ver="4" style_pad_column="6">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="306" width="#screen_w" height="41" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_label name="caption_vu_left" text="L" x="20" y="1" width="16" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_left" x="40" y="8" width="260" height="6" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_left" mode="range" x="40" y="8" width="260" height="6" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            <lv_label name="caption_vu_right" text="R" x="20" y="20" width="16" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_right" x="40" y="27" width="260" height="6" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_right" mode="range" x="40" y="27" width="260" height="6" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++        </lv_obj>
++        <lv_slider name="progress_slider" x="20" y="350" width="280" height="10" style_radius="5" />
++        <lv_label name="pos_label" text="0:00" x="20" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="220" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="26" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="83" y="404" width="24" height="24" inner_align="contain" />
++        <lv_obj name="play_circle" x="135" y="391" width="50" height="50" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="50" height="50" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="213" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="270" y="404" width="24" height="24" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_meter_player_480x720.xml b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_480x720.xml
+new file mode 100644
+index 0000000..7306457
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_meter_player_480x720.xml
+@@ -0,0 +1,41 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="100" y="137" width="280" height="280" scrollable="false" style_radius="9" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="9" y="9" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="231" y="231" width="40" height="40" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="32" height="32" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="56" width="40" height="40" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="32" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="68" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="97" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="428" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="32" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="13" style_pad_ver="5" style_pad_column="9">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="466" width="#screen_w" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_label name="caption_vu_left" text="L" x="30" y="2" width="18" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_left" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_left" mode="range" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            <lv_label name="caption_vu_right" text="R" x="30" y="22" width="18" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
++            <lv_bar name="vu_right" x="56" y="28" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" />
++            <lv_bar name="vu_peak_right" mode="range" x="56" y="28" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="522" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="39" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="124" y="612" width="36" height="36" inner_align="contain" />
++        <lv_obj name="play_circle" x="202" y="592" width="76" height="76" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="76" height="76" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="320" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="405" y="612" width="36" height="36" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player.xml b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player.xml
+new file mode 100644
+index 0000000..8dfae52
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player.xml
+@@ -0,0 +1,57 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="145" y="150" width="190" height="190" scrollable="false" style_radius="10" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="10" y="10" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="134" y="134" width="44" height="44" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="36" height="36" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="62" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="36" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="83" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="117" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="350" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="36" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="14" style_pad_ver="6" style_pad_column="10">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="398" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="30" y="0" width="420" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_bar name="vu_band_1" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_1" mode="range" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_2" x="57" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_2" mode="range" x="57" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_3" x="97" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_3" mode="range" x="97" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_4" x="137" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_4" mode="range" x="137" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_5" x="177" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_5" mode="range" x="177" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_6" x="217" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_6" mode="range" x="217" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_7" x="257" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_7" mode="range" x="257" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_8" x="297" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_8" mode="range" x="297" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_9" x="337" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_9" mode="range" x="337" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_10" x="377" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_10" mode="range" x="377" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="580" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="617" width="120" height="content" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="37" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="122" y="676" width="40" height="40" inner_align="contain" />
++        <lv_obj name="play_circle" x="198" y="654" width="84" height="84" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="84" height="84" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="318" y="676" width="40" height="40" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="403" y="676" width="40" height="40" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player/v1_back.png b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player/v1_back.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c221d603a24ecfe0b5d4678be195e49e22d498f
+GIT binary patch
+literal 323
+zcmV-J0lfZ+P)<h;3K|Lk000e1NJLTq001li001lq1^@s69)wx}0003BNkl<Zc%1Fo
+zyA8rX5QO31^k5`9Ab=uxR6!B+LJ@SqqX-Bn0YM86NE{Flz<Os+NH+zHKAq0e-n!|!
+zj(^IiG~m}%usRj2jvL$pM_?W;aDvCc30MNVXo(Bl0ta9Q+<;BA$N_%81~*^<+@ob`
+za4HrtI30@+EWsiI%diN*QY^_}IhI7Q1xpgxh9v=P#WE0V$1(t11WOQH3`^2S*Ccd&
+zoe1~|tbhwJ?PuJH!1giG6E21xawUqOhu&d3I^(0WqO)cR8#;4Zv!Ju*VL4jy;*g?M
+zZ#o%T`D&J+)q9C_v}5y=igxYRp1>No_UL`I$hp0I^e24=w$YNN{zVd}g4L;DbzV@m
+VUO%;L35@^%002ovPDHLkV1jb*ft>&V
+
+literal 0
+HcmV?d00001
+
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_240x320.xml b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_240x320.xml
+new file mode 100644
+index 0000000..df7caf3
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_240x320.xml
+@@ -0,0 +1,58 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="88" y="8" width="64" height="64" scrollable="false" style_radius="0" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="4" y="4" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" hidden="true" />
++            <lv_obj name="favorite_circle" x="32" y="32" width="32" height="32" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="0" y="8" width="32" height="32" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0">
++            <lv_image src="v1_back" x="8" y="8" width="16" height="16" inner_align="contain" />
++        </lv_obj>
++        <lv_label name="title" text="" x="11" y="80" width="218" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="11" y="106" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="11" y="106" width="218" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" hidden="true" />
++        <lv_obj name="quality_pill" x="0" y="130" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="14" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="6" style_pad_ver="2" style_pad_column="4">
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="152" width="#screen_w" height="68" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="12" y="0" width="216" height="64" style_radius="10" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_bar name="vu_band_1" x="6" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_1" mode="range" x="6" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_2" x="27" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_2" mode="range" x="27" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_3" x="48" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_3" mode="range" x="48" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_4" x="69" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_4" mode="range" x="69" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_5" x="90" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_5" mode="range" x="90" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_6" x="111" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_6" mode="range" x="111" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_7" x="132" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_7" mode="range" x="132" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_8" x="153" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_8" mode="range" x="153" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_9" x="174" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_9" mode="range" x="174" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_10" x="195" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_10" mode="range" x="195" y="7" width="14" height="50" orientation="vertical" style_radius="3" style_radius:indicator="3" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="12" y="222" width="216" height="8" style_radius="4" />
++        <lv_label name="pos_label" text="0:00" x="12" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="156" y="234" width="72" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="13" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="55" y="264" width="32" height="32" inner_align="contain" />
++        <lv_obj name="play_circle" x="98" y="258" width="44" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="44" height="44" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="153" y="264" width="32" height="32" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="196" y="264" width="32" height="32" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_320x480.xml b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_320x480.xml
+new file mode 100644
+index 0000000..c01e45d
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_320x480.xml
+@@ -0,0 +1,57 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="100" y="91" width="120" height="120" scrollable="false" style_radius="6" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="6" y="6" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="88" y="88" width="26" height="26" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="24" height="24" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="15" y="37" width="26" height="26" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="15" y="22" width="290" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="15" y="45" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="15" y="68" width="290" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="218" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="22" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="8" style_pad_ver="4" style_pad_column="6">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="246" width="#screen_w" height="100" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="20" y="0" width="280" height="96" style_radius="12" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_bar name="vu_band_1" x="9" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_1" mode="range" x="9" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_2" x="36" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_2" mode="range" x="36" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_3" x="63" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_3" mode="range" x="63" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_4" x="90" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_4" mode="range" x="90" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_5" x="117" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_5" mode="range" x="117" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_6" x="144" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_6" mode="range" x="144" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_7" x="171" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_7" mode="range" x="171" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_8" x="198" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_8" mode="range" x="198" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_9" x="225" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_9" mode="range" x="225" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_10" x="252" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_10" mode="range" x="252" y="10" width="18" height="76" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="20" y="352" width="280" height="10" style_radius="5" />
++        <lv_label name="pos_label" text="0:00" x="20" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="220" y="374" width="80" height="22" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="26" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="83" y="404" width="24" height="24" inner_align="contain" />
++        <lv_obj name="play_circle" x="135" y="391" width="50" height="50" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="50" height="50" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="213" y="404" width="24" height="24" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="270" y="404" width="24" height="24" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_480x720.xml b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_480x720.xml
+new file mode 100644
+index 0000000..858f625
+--- /dev/null
++++ b/plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_480x720.xml
+@@ -0,0 +1,57 @@
++<component>
++    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
++        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
++            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
++        </lv_obj>
++        <lv_obj name="cover_card" x="165" y="135" width="150" height="150" scrollable="false" style_radius="9" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="cover_img" src="default_cover" align="center" />
++            <lv_label name="song_count" text="" x="9" y="9" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
++            <lv_obj name="favorite_circle" x="104" y="104" width="40" height="40" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
++                <lv_image name="favorite_icon" src="collect_out" width="32" height="32" align="center" inner_align="contain" />
++            </lv_obj>
++        </lv_obj>
++        <lv_obj name="dismiss_btn" x="22" y="56" width="40" height="40" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
++        <lv_label name="title" text="" x="22" y="32" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
++        <lv_label name="artist" text="" x="22" y="68" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_label name="album" text="" x="22" y="97" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
++        <lv_obj name="quality_pill" x="0" y="293" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="32" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="13" style_pad_ver="5" style_pad_column="9">
++            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
++            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
++        </lv_obj>
++        <lv_obj name="vu_meter" x="0" y="336" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_obj x="30" y="0" width="420" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
++                <lv_bar name="vu_band_1" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_1" mode="range" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_2" x="57" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_2" mode="range" x="57" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_3" x="97" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_3" mode="range" x="97" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_4" x="137" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_4" mode="range" x="137" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_5" x="177" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_5" mode="range" x="177" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_6" x="217" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_6" mode="range" x="217" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_7" x="257" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_7" mode="range" x="257" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_8" x="297" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_8" mode="range" x="297" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_9" x="337" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_9" mode="range" x="337" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++                <lv_bar name="vu_band_10" x="377" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
++                <lv_bar name="vu_band_peak_10" mode="range" x="377" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />
++            </lv_obj>
++        </lv_obj>
++        <lv_slider name="progress_slider" x="30" y="522" width="420" height="14" style_radius="7" />
++        <lv_label name="pos_label" text="0:00" x="30" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
++        <lv_label name="dur_label" text="--:--" x="330" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
++        <lv_image name="order_btn" src="order" x="39" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="prev_btn" src="btn_prev" x="124" y="612" width="36" height="36" inner_align="contain" />
++        <lv_obj name="play_circle" x="202" y="592" width="76" height="76" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
++            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="76" height="76" inner_align="contain" />
++        </lv_obj>
++        <lv_image name="next_btn" src="btn_next" x="320" y="612" width="36" height="36" inner_align="contain" />
++        <lv_image name="more_btn" src="ic_more" x="405" y="612" width="36" height="36" inner_align="contain" />
++        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
++    </view>
++</component>
+diff --git a/plugins/VUMeterPlayer/store.json b/plugins/VUMeterPlayer/store.json
+new file mode 100644
+index 0000000..766fe93
+--- /dev/null
++++ b/plugins/VUMeterPlayer/store.json
+@@ -0,0 +1,67 @@
++{
++  "description": "The Default Now Playing screen with a meter under the cover, moving with what you hear. Three layouts: VU Meter Player has two slim level bars with peak hold, VU Dial Player two round dials with needles, VU Spectrum Player a ten-band spectrum with falling caps, all in the theme's accent. Needs a player with the level meter (capability ui.player_layout_meter).",
++  "category": "Customization",
++  "author": "Krish Paul",
++  "files": [
++    {
++      "src": "player_layouts/vu_meter_player.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_meter_player.xml"
++    },
++    {
++      "src": "player_layouts/vu_meter_player_320x480.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_meter_player_320x480.xml"
++    },
++    {
++      "src": "player_layouts/vu_meter_player_480x720.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_meter_player_480x720.xml"
++    },
++    {
++      "src": "player_layouts/vu_meter_player_240x320.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_meter_player_240x320.xml"
++    },
++    {
++      "src": "player_layouts/vu_meter_player/v1_back.png",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_meter_player/v1_back.png"
++    },
++    {
++      "src": "player_layouts/vu_dial_player.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_dial_player.xml"
++    },
++    {
++      "src": "player_layouts/vu_dial_player_320x480.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_dial_player_320x480.xml"
++    },
++    {
++      "src": "player_layouts/vu_dial_player_480x720.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_dial_player_480x720.xml"
++    },
++    {
++      "src": "player_layouts/vu_dial_player_240x320.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_dial_player_240x320.xml"
++    },
++    {
++      "src": "player_layouts/vu_dial_player/v1_back.png",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_dial_player/v1_back.png"
++    },
++    {
++      "src": "player_layouts/vu_spectrum_player.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_spectrum_player.xml"
++    },
++    {
++      "src": "player_layouts/vu_spectrum_player_320x480.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_320x480.xml"
++    },
++    {
++      "src": "player_layouts/vu_spectrum_player_480x720.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_480x720.xml"
++    },
++    {
++      "src": "player_layouts/vu_spectrum_player_240x320.xml",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_spectrum_player_240x320.xml"
++    },
++    {
++      "src": "player_layouts/vu_spectrum_player/v1_back.png",
++      "dest": ".plugins/VUMeterPlayer/player_layouts/vu_spectrum_player/v1_back.png"
++    }
++  ]
++}
+-- 
+2.43.0
+

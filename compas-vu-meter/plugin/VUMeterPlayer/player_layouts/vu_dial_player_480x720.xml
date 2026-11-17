@@ -1,0 +1,49 @@
+<component>
+    <view extends="lv_obj" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0">
+        <lv_obj name="overlay_panel" x="0" y="0" width="#screen_w" height="#screen_h" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
+            <lv_image name="background_img" x="0" y="0" width="#screen_w" height="#screen_h" />
+        </lv_obj>
+        <lv_obj name="cover_card" x="165" y="135" width="150" height="150" scrollable="false" style_radius="9" style_clip_corner="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
+            <lv_image name="cover_img" src="default_cover" align="center" />
+            <lv_label name="song_count" text="" x="9" y="9" width="content" height="content" style_text_font="font_16" style_bg_opa="128" style_radius="100" style_pad_hor="9" style_pad_ver="5" />
+            <lv_obj name="favorite_circle" x="104" y="104" width="40" height="40" scrollable="false" style_radius="100" style_bg_opa="102" style_border_width="0" style_pad_all="0">
+                <lv_image name="favorite_icon" src="collect_out" width="32" height="32" align="center" inner_align="contain" />
+            </lv_obj>
+        </lv_obj>
+        <lv_obj name="dismiss_btn" x="22" y="56" width="40" height="40" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
+        <lv_label name="title" text="" x="22" y="32" width="436" height="content" style_text_font="player_title" style_text_align="center" style_pad_all="0" />
+        <lv_label name="artist" text="" x="22" y="68" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
+        <lv_label name="album" text="" x="22" y="97" width="436" height="content" style_text_font="player_meta" style_text_align="center" style_pad_all="0" />
+        <lv_obj name="quality_pill" x="0" y="293" width="content" height="content" scrollable="false" style_radius="100" style_bg_opa="51" style_border_width="0" style_pad_all="0" clickable="false" align="top_mid" style_min_height="32" style_bg_color="0x000000" flex_flow="row" style_flex_main_place="center" style_flex_cross_place="center" style_flex_track_place="center" style_pad_hor="13" style_pad_ver="5" style_pad_column="9">
+            <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
+            <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
+        </lv_obj>
+        <lv_obj name="vu_meter" x="0" y="336" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
+            <lv_obj x="30" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
+                <lv_arc name="vu_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
+                <lv_arc name="vu_peak_left" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
+                <lv_obj name="vu_needle_left" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
+                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
+                <lv_label name="caption_vu_left" text="L" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
+            </lv_obj>
+            <lv_obj x="246" y="0" width="204" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
+                <lv_arc name="vu_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" />
+                <lv_arc name="vu_peak_right" x="-28" y="8" width="260" height="260" rotation="0" bg_start_angle="225" bg_end_angle="315" start_angle="225" end_angle="225" value="0" min_value="0" max_value="100" mode="normal" clickable="false" style_arc_width="6" style_arc_width:indicator="6" style_arc_rounded="true" style_arc_rounded:indicator="true" style_bg_opa="0" style_border_width="0" style_pad_all="0" style_arc_opa="0" />
+                <lv_obj name="vu_needle_right" x="101" y="26" width="3" height="112" style_radius="3" style_bg_color="0xffffff" style_bg_opa="255" style_transform_pivot_x="1" style_transform_pivot_y="112" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
+                <lv_obj name="accent_background" x="95" y="131" width="14" height="14" style_radius="100" style_bg_opa="255" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false" />
+                <lv_label name="caption_vu_right" text="R" x="14" y="120" width="content" height="content" style_text_font="font_16" style_pad_all="0" />
+            </lv_obj>
+        </lv_obj>
+        <lv_slider name="progress_slider" x="30" y="522" width="420" height="14" style_radius="7" />
+        <lv_label name="pos_label" text="0:00" x="30" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="left" style_pad_all="0" />
+        <lv_label name="dur_label" text="--:--" x="330" y="560" width="120" height="24" style_text_font="player_meta" style_text_align="right" style_pad_all="0" />
+        <lv_image name="order_btn" src="order" x="39" y="612" width="36" height="36" inner_align="contain" />
+        <lv_image name="prev_btn" src="btn_prev" x="124" y="612" width="36" height="36" inner_align="contain" />
+        <lv_obj name="play_circle" x="202" y="592" width="76" height="76" scrollable="false" style_bg_opa="0" style_border_width="0" style_pad_all="0" clickable="false">
+            <lv_image name="play_btn" src="btn_play" x="0" y="0" width="76" height="76" inner_align="contain" />
+        </lv_obj>
+        <lv_image name="next_btn" src="btn_next" x="320" y="612" width="36" height="36" inner_align="contain" />
+        <lv_image name="more_btn" src="ic_more" x="405" y="612" width="36" height="36" inner_align="contain" />
+        <lv_slider name="volume_slider" width="100" height="10" hidden="true" />
+    </view>
+</component>

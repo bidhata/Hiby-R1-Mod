@@ -20,8 +20,10 @@ the theme's accent rather than as imitation hardware.
 Each folder has a `PR_DESCRIPTION.md` with what was and was not tested. The
 short version: the meter logic is tested on the host, and all three layouts
 run on my R1 (the pictures in `screenshots/`), on v1.5.1 with the
-change ported and on v1.6.0. The timing has only been judged by eye, and
-Bluetooth and USB output are untried.
+change ported and on v1.6.0. The timing has only been judged by eye; Bluetooth
+and USB output, sources other than a 48 kHz MP3, long runs and the lyrics
+pane are all untried. Please read it as a working proposal, not a finished
+one.
 
 One thing went wrong along the way, and it turned out to be v1.5.1's: twice
 the framebuffer driver stopped scanout (`soc_fb: continuous pan failed -5`)

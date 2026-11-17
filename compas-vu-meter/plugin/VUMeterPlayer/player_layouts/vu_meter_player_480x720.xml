@@ -18,7 +18,10 @@
             <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
             <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
         </lv_obj>
-        <lv_obj name="vu_meter" x="0" y="466" width="#screen_w" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="false">
+        <lv_obj name="vu_meter" x="0" y="466" width="#screen_w" height="44" scrollable="false" style_bg_opa="0" style_border_width="0" style_radius="0" style_pad_all="0" clickable="true">
+            <event_cb trigger="clicked" callback="compas_action" user_data="vu_to_dial" />
+            <lv_label name="vu_swipe_left" text="vu_to_dial" hidden="true" />
+            <lv_label name="vu_swipe_right" text="vu_to_spectrum" hidden="true" />
             <lv_label name="caption_vu_left" text="L" x="30" y="2" width="18" height="content" style_text_font="font_16" style_text_align="left" style_pad_all="0" />
             <lv_bar name="vu_left" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" />
             <lv_bar name="vu_peak_left" mode="range" x="56" y="8" width="394" height="8" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />

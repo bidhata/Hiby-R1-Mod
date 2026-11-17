@@ -18,7 +18,10 @@
             <lv_image src="quality_waveform" width="20" height="20" inner_align="contain" name="quality_icon" />
             <lv_label name="format_badge" text="" width="content" height="content" style_text_font="font_16" style_text_align="center" long_mode="clip" style_pad_all="0" />
         </lv_obj>
-        <lv_obj name="vu_meter" x="0" y="398" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
+        <lv_obj name="vu_meter" x="0" y="398" width="#screen_w" height="154" style_bg_opa="0" style_radius="0" scrollable="false" style_border_width="0" style_pad_all="0" clickable="true">
+            <event_cb trigger="clicked" callback="compas_action" user_data="vu_to_meter" />
+            <lv_label name="vu_swipe_left" text="vu_to_meter" hidden="true" />
+            <lv_label name="vu_swipe_right" text="vu_to_dial" hidden="true" />
             <lv_obj x="30" y="0" width="420" height="150" style_radius="16" style_bg_color="0x000000" style_bg_opa="51" scrollable="false" style_border_width="0" style_pad_all="0" clickable="false">
                 <lv_bar name="vu_band_1" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="38" />
                 <lv_bar name="vu_band_peak_1" mode="range" x="17" y="14" width="26" height="122" orientation="vertical" style_radius="4" style_radius:indicator="4" style_border_width="0" style_pad_all="0" style_bg_opa="0" />

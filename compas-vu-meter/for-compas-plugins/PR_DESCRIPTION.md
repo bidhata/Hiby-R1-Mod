@@ -13,7 +13,9 @@ plain seek bar and a smaller cover, all in the theme's accent. VU Meter
 Player puts two slim bars, L and R, with a peak-hold mark between the
 quality pill and the seek bar. VU Dial Player puts two round dials there,
 each an arc with a needle and a peak mark. VU Spectrum Player puts a
-ten-band spectrum there, with falling caps. Variants for 480x800, 480x720,
+ten-band spectrum there, with falling caps. A swipe across the meter, or a tap
+on it, moves between the three (`ui.player_actions`); that lasts until the
+player restarts, and the layout chosen in Settings is the one it starts with. Variants for 480x800, 480x720,
 320x480 and 240x320; the smallest has no L/R captions.
 `v1_back.png` is the same file the other layouts ship.
 
@@ -33,7 +35,10 @@ ten-band spectrum there, with falling caps. Variants for 480x800, 480x720,
 - The 480x720, 320x480 and 240x320 variants on a device. The spacing of the
   two smallest was set without the real fonts and may need a few pixels
   either way.
-- With the lyrics open.
+- The swipe and the tap between layouts, on a device.
+- With the lyrics open: the meter is meant to leave with the controls, and
+  that has not been looked at on any of the three layouts.
+- The bars layout on v1.6.0 (seen on v1.5.1 only).
 - There is no `preview.jpg` and no layout `.png` yet. I have screenshots
   from the R1, of a track without cover art; I will add proper ones, or you
   are welcome to.

@@ -43,6 +43,8 @@ You need a player built with the patch.
 
 4. **Settings > Personalize > Player Layout**, and pick **VU Meter Player**,
    **VU Dial Player** or **VU Spectrum Player**.
+5. On Now Playing, swipe left or right across the meter (or tap it) to move
+   between the three.
 
 ## State
 
@@ -50,8 +52,9 @@ Run on one HiBy R1, on v1.5.1 with the change ported and on v1.6.0, through
 the headphone socket. What has and has not been tested, the processor cost,
 and one display problem met on v1.5.1 (and why it is v1.5.1's) are in
 `for-compas-player/PR_DESCRIPTION.md`. In short: the timing has only been
-judged by eye, Bluetooth and USB output are untried, only the 480x800
-layouts have been seen on a device, and the spectrum costs noticeably more
-processor time than the other two.
+judged by eye; Bluetooth and USB output, hi-res and mono files, long runs
+and the lyrics pane are untried; only the 480x800 layouts have been seen on
+a device; and the spectrum costs noticeably more processor time than the
+other two.
 
 GPL-3.0-or-later, like CompásOS.

@@ -14,6 +14,7 @@ peak can be an `lv_bar`, or an `lv_arc` for a round dial:
 | `vu_needle_left`, `vu_needle_right` | any object, turned about its transform pivot: 45° left of upright when empty, 45° right when full |
 | `vu_band_1` … `vu_band_10`, `vu_band_peak_1` … | a spectrum in ten octave bands, 31 Hz to 16 kHz, each with a cap that is held and then falls |
 | `vu_meter` | optional object around the meter; hidden as one with the controls while the lyrics are open |
+| `vu_swipe_left`, `vu_swipe_right` | hidden labels inside `vu_meter` whose text names the plugin action a sideways swipe on the meter runs |
 
 The scale is linear in dB from -48 to full scale; the level is RMS + 3 dB, so
 a full-scale sine fills the bar. A peak bar with `mode="range"` is drawn as a
@@ -40,6 +41,9 @@ the level bars' track takes the backdrop rail style; local XML styles win.
 - The audio thread measures only while a meter asked within the last second.
   Otherwise the cost per chunk is one atomic load, and one clock read once a
   meter has ever been shown. Above 48 kHz every Nth frame is measured.
+- The swipe is an `LV_EVENT_GESTURE` handler on the group, which is also
+  registered as a swipe dead zone (as the image viewer does for its body)
+  and unregistered with the seek bar when the tree goes.
 - Capability token `ui.player_layout_meter`. `PLUGIN_API_VERSION` is not
   raised.
 
@@ -92,6 +96,15 @@ was invalidated after screen-off.
   tuning; the two constants are at the top of the tap in `audio_output.c`.
 - The bars layout on v1.6.0, and any layout with the lyrics open.
 - The source of the "Resource busy" lines above.
+- The swipe and the tap between layouts on a device: the tap's hit-testing
+  and dispatch are checked in the host build, the swipe only compiles.
+- Sources other than 48 kHz stereo MP3: mono files, 24-bit and high-rate
+  PCM (the S24 path and the every-Nth-frame measuring above 48 kHz are
+  covered by the host test only), DSD, and the USB DAC bridge.
+- Long runs. The longest continuous run was a few minutes, so nothing here
+  says anything about leaks or drift over an album.
+- The build as the installed player rather than run from the card: it boots
+  and shows the home screen; Now Playing was not opened after installing.
 - The R3 Pro II, the R3 II 2025 and the Tempotec V1, and the host simulator.
 
 **For the docs.** `docs/reference/PLAYER_LAYOUTS.md` and the layouts page on

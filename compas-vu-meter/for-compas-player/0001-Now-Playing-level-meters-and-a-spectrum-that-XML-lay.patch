@@ -1,4 +1,4 @@
-From 6038d8b9f7b0429de21fa03b6e5b5d3ca52356f5 Mon Sep 17 00:00:00 2001
+From 1ae003fa4ed6a64aa0e9a784b6252c70c732c15e Mon Sep 17 00:00:00 2001
 From: Krish Paul <me@krishnendu.com>
 Date: Wed, 18 Nov 2026 04:55:58 +0800
 Subject: [PATCH] Now Playing: level meters and a spectrum that XML layouts can
@@ -12,6 +12,10 @@ vu_band_10, with vu_band_peak_ caps, for a spectrum in ten octave bands;
 and optionally an object named vu_meter around them so the group leaves
 with the controls while the lyrics are open. The player sets the values
 on the existing 50 ms player tick; no Lua runs per frame.
+
+The vu_meter group can also be swiped sideways: hidden labels inside it
+named vu_swipe_left and vu_swipe_right give the plugin action to run for
+each direction, and the group becomes a swipe dead zone for the shell.
 
 The levels are measured where PCM leaves for the output
 (audio_output_write, audio_output_write_s24, and the SDL sink on the
@@ -35,10 +39,10 @@ Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
  .../bindings/ui/plugin_info_bindings.c        |   3 +-
  src/ui/application/gui_control_poll.c         |   1 +
  src/ui/player/meter/player_vu_meter.c         | 293 ++++++++++++++++++
- src/ui/player/meter/player_vu_meter.h         |  63 ++++
- src/ui/player/screen/gui_player.c             |  24 ++
+ src/ui/player/meter/player_vu_meter.h         |  67 ++++
+ src/ui/player/screen/gui_player.c             |  62 ++++
  src/ui/player/screen/gui_player.h             |   2 +
- 11 files changed, 696 insertions(+), 1 deletion(-)
+ 11 files changed, 738 insertions(+), 1 deletion(-)
  create mode 100644 src/audio/visualization/level_meter.c
  create mode 100644 src/audio/visualization/level_meter.h
  create mode 100644 src/ui/player/meter/player_vu_meter.c
@@ -776,10 +780,10 @@ index 0000000..9fdbe9f
 +}
 diff --git a/src/ui/player/meter/player_vu_meter.h b/src/ui/player/meter/player_vu_meter.h
 new file mode 100644
-index 0000000..f0271db
+index 0000000..204528f
 --- /dev/null
 +++ b/src/ui/player/meter/player_vu_meter.h
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,67 @@
 +#ifndef PLAYER_VU_METER_H
 +#define PLAYER_VU_METER_H
 +
@@ -822,6 +826,10 @@ index 0000000..f0271db
 + * hidden with the transport controls while the lyrics are open. Without the
 + * group only the bars and arcs are, so a layout with needles wants the group.
 + *
++ * The group can also be swiped sideways: it names a plugin action for each
++ * direction in a hidden label inside it, vu_swipe_left and vu_swipe_right
++ * (gui_player.c binds this; the meter itself does not know about it).
++ *
 + * The bars and arcs take the theme accent on their indicator and, when given,
 + * the backdrop rail style on the level's track; local XML style properties
 + * outrank both. An arc's knob is hidden. Everything is made non-clickable so
@@ -844,7 +852,7 @@ index 0000000..f0271db
 +
 +#endif
 diff --git a/src/ui/player/screen/gui_player.c b/src/ui/player/screen/gui_player.c
-index 54b495e..e94bb7a 100644
+index 54b495e..301ef72 100644
 --- a/src/ui/player/screen/gui_player.c
 +++ b/src/ui/player/screen/gui_player.c
 @@ -59,6 +59,7 @@
@@ -855,7 +863,47 @@ index 54b495e..e94bb7a 100644
  #include "../../effects/transition_compositor.h"
  #include "lvgl/src/core/lv_obj_draw_private.h"
  #include "lvgl/src/draw/sw/lv_draw_sw_private.h"
-@@ -1058,6 +1059,14 @@ static void player_bind_lyrics_pane(lv_obj_t * scr, const player_roles_t * r, pl
+@@ -476,6 +477,39 @@ static lv_obj_t * player_create_hidden_label(lv_obj_t * parent) {
+     return label;
+ }
+ 
++/* A layout's meter group can be swiped sideways, as on players that page
++ * between a cover, a level meter and a spectrum. The group names the plugin
++ * action for each direction in a hidden label inside it, vu_swipe_left and
++ * vu_swipe_right, the way seek_style names a seek bar's look; the action is
++ * typically one that selects another layout. The group is a swipe dead zone
++ * so the shell's back and player swipes leave the drag alone. */
++static lv_obj_t * player_vu_swipe_zone;
++
++static void player_vu_swipe_cb(lv_event_t * e) {
++    if (lv_event_get_code(e) != LV_EVENT_GESTURE) return;
++    lv_indev_t * indev = lv_event_get_indev(e);
++    if (!indev) indev = lv_indev_active();
++    if (!indev) return;
++    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
++    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) return;
++    lv_obj_t * group = lv_event_get_current_target(e);
++    lv_obj_t * name = lv_obj_find_by_name(group, dir == LV_DIR_LEFT ? "vu_swipe_left" : "vu_swipe_right");
++    if (!name || !lv_obj_check_type(name, &lv_label_class)) return;
++    /* The release that ends the swipe must not also count as a tap. */
++    lv_indev_wait_release(indev);
++    player_layouts_dispatch_action_from(group, lv_label_get_text(name));
++}
++
++static void player_bind_vu_swipe(lv_obj_t * scr) {
++    lv_obj_t * group = lv_obj_find_by_name(scr, "vu_meter");
++    if (!group || player_layout_builtin) return;
++    if (!lv_obj_find_by_name(group, "vu_swipe_left") && !lv_obj_find_by_name(group, "vu_swipe_right")) return;
++    lv_obj_add_flag(group, LV_OBJ_FLAG_CLICKABLE); /* or the press never reaches it */
++    lv_obj_add_event_cb(group, player_vu_swipe_cb, LV_EVENT_GESTURE, NULL);
++    register_swipe_dead_zone(group);
++    player_vu_swipe_zone = group;
++}
++
+ static bool player_obj_is_ancestor_of(const lv_obj_t * ancestor, const lv_obj_t * obj) {
+     for (const lv_obj_t * p = obj ? lv_obj_get_parent(obj) : NULL; p; p = lv_obj_get_parent(p)) {
+         if (p == ancestor) return true;
+@@ -1058,6 +1092,14 @@ static void player_bind_lyrics_pane(lv_obj_t * scr, const player_roles_t * r, pl
                                  player_obj_is_ancestor_of(kept[k], controls[i]))) hide = false;
              if (hide) player_add_lyrics_control(controls[i]);
          }
@@ -870,7 +918,7 @@ index 54b495e..e94bb7a 100644
      }
  
      /* Named timelines an XML layout may provide; resolved once, here. */
-@@ -1158,6 +1167,11 @@ static bool player_bind_widgets(lv_obj_t * scr) {
+@@ -1158,6 +1200,12 @@ static bool player_bind_widgets(lv_obj_t * scr) {
          scr, r.cover_fade, r.lyrics_area, NULL, NULL, false);
      player_bind_lyrics_look(scr, &r);
      player_style_custom_layout(scr, &r);
@@ -879,18 +927,30 @@ index 54b495e..e94bb7a 100644
 +    player_vu_meter_bind(scr, player_layout_builtin ? NULL : player_backdrop_progress_style(false),
 +                         player_layout_builtin ? NULL : player_backdrop_progress_style(true),
 +                         gui_theme_accent_style());
++    player_bind_vu_swipe(scr);
  
      /* Queue counts must stay on one line even when an XML layout gives the
       * label a narrow fixed width. Keep content-width labels content-sized so
-@@ -1227,6 +1241,7 @@ static void player_reset_widget_globals(void) {
+@@ -1227,6 +1275,9 @@ static void player_reset_widget_globals(void) {
      player_inline_lyrics_reset();
      if (player_waveform_seekbar) waveform_cancel();
      player_waveform_seekbar = false;
 +    player_vu_meter_reset();
++    if (player_vu_swipe_zone) unregister_swipe_dead_zone(player_vu_swipe_zone);
++    player_vu_swipe_zone = NULL;
      player_overlay_panel = NULL;
      player_background_img = NULL;
      cover_card = NULL;
-@@ -1729,6 +1744,15 @@ bool gui_player_sync_popup_pause(void) {
+@@ -1544,6 +1595,8 @@ static void gui_player_teardown_internal(bool preserve_shared_state) {
+      * seekbar pointer before deleting the widget, or the next touch walks
+      * freed memory while resolving its screen. */
+     if (progress_slider) unregister_swipe_dead_zone(progress_slider);
++    if (player_vu_swipe_zone) unregister_swipe_dead_zone(player_vu_swipe_zone);
++    player_vu_swipe_zone = NULL;
+     if (player_screen) { lv_obj_delete(player_screen); player_screen = NULL; }
+     /* player_overlay_panel/cover_img are descendants of player_screen, so
+      * lv_obj_delete() above already destroyed them -- null the pointers too
+@@ -1729,6 +1782,15 @@ bool gui_player_sync_popup_pause(void) {
      return blocked;
  }
  

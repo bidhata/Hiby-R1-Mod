@@ -8,11 +8,14 @@
 -- vu_band_10 with their vu_band_peak_ caps) and the player moves them. A player
 -- without the meter would leave them still, so the layouts are only offered
 -- where the capability is present.
+--
+-- Swiping across the meter on Now Playing, or tapping it, switches between
+-- the three.
 
 plugin.define({
     id = "org.krishnendu.vu_meter_player",
     name = "VU Meter Player",
-    version = "1.2.0",
+    version = "1.3.0",
     api_min = 19,
 })
 
@@ -82,21 +85,41 @@ local function tr(s)
     return plugin.tr(s, T)
 end
 
-if plugin.has_capability and plugin.has_capability("ui.player_layout_xml")
-        and plugin.has_capability("ui.player_layout_meter") then
-    plugin.set_player_layout({
+local LAYOUTS = {
+    meter = {
         id = "plugin.vu_meter_player",
         xml = "VUMeterPlayer/player_layouts/vu_meter_player.xml",
         name = tr("VU Meter Player"),
-    })
-    plugin.set_player_layout({
+    },
+    dial = {
         id = "plugin.vu_dial_player",
         xml = "VUMeterPlayer/player_layouts/vu_dial_player.xml",
         name = tr("VU Dial Player"),
-    })
-    plugin.set_player_layout({
+    },
+    spectrum = {
         id = "plugin.vu_spectrum_player",
         xml = "VUMeterPlayer/player_layouts/vu_spectrum_player.xml",
         name = tr("VU Spectrum Player"),
-    })
+    },
+}
+
+if plugin.has_capability and plugin.has_capability("ui.player_layout_xml")
+        and plugin.has_capability("ui.player_layout_meter") then
+    -- Listed in Settings > Personalize > Player Layout, in this order.
+    plugin.set_player_layout(LAYOUTS.meter)
+    plugin.set_player_layout(LAYOUTS.dial)
+    plugin.set_player_layout(LAYOUTS.spectrum)
+
+    -- A swipe across the meter goes to the next kind or the one before, and
+    -- a tap to the next: bars, dials, spectrum, bars. Each layout names its
+    -- neighbours, so no state is kept here. The
+    -- change lasts until the player restarts; the layout chosen in Settings
+    -- is the one it starts with.
+    if plugin.has_capability("ui.player_actions") then
+        for name, layout in pairs(LAYOUTS) do
+            plugin.register_player_action("vu_to_" .. name, function()
+                plugin.set_player_layout(layout)
+            end)
+        end
+    end
 end
